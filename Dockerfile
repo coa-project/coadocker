@@ -23,4 +23,4 @@ RUN cat /usr/share/python3/app/pkgdeps.txt | xargs apt-install
 
 # Create a symlink to the target binary (just for convenience)
 RUN ln -snf /usr/share/python3/app/bin/ipython /usr/bin/
-CMD ["ipython"]
+CMD ["ipython"] coabook/using_pycoa_in_depth.ipynb
