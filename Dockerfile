@@ -1,16 +1,9 @@
-ARG BASE_CONTAINER=jupyter/base-notebook
-FROM $BASE_CONTAINER
-LABEL maintainer="PYCOA www.pycoa.fr"
+FROM python:3.8-slim-buster
 
-USER root
+WORKDIR /app
 
-RUN apt-get update && apt-get install -yq --no-install-recommends \
-    build-essential \
-    git \
-    curl \
-    python3-pip \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
+COPY requirements.txt requirements.txt
+RUN pip3 install -r requirements.txt
 RUN git clone https://github.com/coa-project/pycoa.git 
 RUN git clone https://github.com/coa-project/coabook.git
 RUN pip install --upgrade setuptools
