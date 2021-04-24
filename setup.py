@@ -13,14 +13,11 @@ About : mandatory setup file
 from setuptools import setup, find_packages
 
 pkg_vars  = {}
-#with open("coa/_version.py") as fp:
-#    exec(fp.read(), pkg_vars)
 
 setup(
     # Needed to silence warnings (and to be a worthwhile package)
     name='PyCoA',
     url='https://github.com/coa-project/pycoa',
-    #version=pkg_vars['__version__'],
     author=pkg_vars['__author__'],
     author_email=pkg_vars['__email__'],
     # Needed to actually package something
