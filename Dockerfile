@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -yq --no-install-recommends \
 
 RUN git clone https://github.com/coa-project/pycoa.git 
 RUN git clone https://github.com/coa-project/coabook.git
-RUN pip3 install pycoa/setup.py
+RUN sudo pip3 install pycoa/setup.py
 # Create alternative for nano -> nano-tiny
 RUN update-alternatives --install /usr/bin/nano nano /bin/nano-tiny 10
 # Switch back to jovyan to avoid accidental container runs as root
