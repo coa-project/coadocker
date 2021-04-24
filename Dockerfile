@@ -4,7 +4,7 @@ FROM snakepacker/python:all as builder
 # Target folder should be the same on the build stage and on the target stage
 RUN python3.7 -m venv /usr/share/python3/app
 RUN /usr/share/python3/app/bin/pip install -U pip 'ipython[notebook]'
-RUN pip install jupyterlab
+RUN pip install notebook
 RUN git clone https://github.com/coa-project/pycoa.git
 RUN git clone https://github.com/coa-project/coabook.git
 # Will be find required system libraries and their packages
