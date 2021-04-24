@@ -13,7 +13,7 @@ RUN git clone https://github.com/coa-project/coabook.git
 
 #RUN pip3 install -r requirements.txt
 RUN pip3 install jupyter
-CMD ["jupyter", "notebook", "--port=8888", "--no-browser", "--ip=0.0.0.0", "--allow-root"]
+CMD ["jupyter", "notebook"]
 # Will be find required system libraries and their packages
 #RUN find-libdeps /usr/share/python3/app > /usr/share/python3/app/pkgdeps.txt
 
