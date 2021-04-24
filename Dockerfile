@@ -2,10 +2,12 @@ FROM $BASE_CONTAINER
 LABEL maintainer="PYCOA www.pycoa.fr"
 
 USER root
-RUN apt-get install -yq --no-install-recommends
+
+RUN apt-get update && apt-get install -yq --no-install-recommends \
+    build-essential \
     git \
-    curl \	
-    python3-pip \	
+    curl \
+    python3-pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/coa-project/pycoa.git 
