@@ -1,31 +1,9 @@
-# Copyright (c) Jupyter Development Team.
-# Distributed under the terms of the Modified BSD License.
-ARG BASE_CONTAINER=jupyter/base-notebook
-FROM $BASE_CONTAINER
-
-LABEL maintainer="Jupyter Project <jupyter@googlegroups.com> \ Modified for PYCOA www.pycoa.fr"
+LABEL maintainer="PYCOA www.pycoa.fr"
 
 USER root
 
 # Install all OS dependencies for fully functional notebook server
-RUN apt-get update && apt-get install -yq --no-install-recommends \
-    build-essential \
-    vim-tiny \
-    git \
-    inkscape \
-    libsm6 \
-    libxext-dev \
-    libxrender1 \
-    lmodern \
-    netcat \
-    # ---- nbconvert dependencies ----
-    texlive-xetex \
-    texlive-fonts-recommended \
-    texlive-plain-generic \
-    # ----
-    tzdata \
-    unzip \
-    nano-tiny \
+RUN apt-get install -yq --no-install-recommends
     git \
     curl \	
     python3-pip \	
