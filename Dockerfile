@@ -1,3 +1,4 @@
+FROM $BASE_CONTAINER
 LABEL maintainer="PYCOA www.pycoa.fr"
 
 USER root
