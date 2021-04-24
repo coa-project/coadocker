@@ -1,4 +1,4 @@
-name: example-environment
+name: pycoa-environment
 channels:
   - conda-forge
 dependencies:
@@ -10,3 +10,19 @@ dependencies:
     - sphinx-gallery
     - pandas
     - matplotlib
+    - bokeh
+    - branca
+    - bs4
+    - datascroller
+    - datetime
+    - folium ~=0.12.1
+    - geopandas
+    - matplotlib
+    - numpy
+    - pandas
+    - pycountry
+    - pycountry_convert
+    - requests
+    - scipy
+    - shapely
+    - pytest >=5.0
