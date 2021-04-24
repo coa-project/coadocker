@@ -1,3 +1,4 @@
+ARG BASE_CONTAINER=jupyter/base-notebook
 FROM $BASE_CONTAINER
 LABEL maintainer="PYCOA www.pycoa.fr"
 
