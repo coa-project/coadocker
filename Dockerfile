@@ -34,10 +34,9 @@ RUN apt-get update && apt-get install -yq --no-install-recommends \
 RUN git clone https://github.com/coa-project/pycoa.git 
 RUN git clone https://github.com/coa-project/coabook.git
 RUN pip install --upgrade setuptools
-RUN curl -O https://raw.githubusercontent.com/coa-project/pycoa/main/setup.py
 RUN curl -O https://raw.githubusercontent.com/coa-project/coadocker/master/setup.py
-RUN python setup.py install  --no-cache-dir 
+RUN python --no-cache-dir setup.py install  
 # Create alternative for nano -> nano-tiny
-RUN update-alternatives --install /usr/bin/nano nano /bin/nano-tiny 10
+#RUN update-alternatives --install /usr/bin/nano nano /bin/nano-tiny 10
 # Switch back to jovyan to avoid accidental container runs as root
 USER $NB_UID
