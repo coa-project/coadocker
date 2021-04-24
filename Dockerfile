@@ -2,8 +2,8 @@
 # Distributed under the terms of the Modified BSD License.
 ARG BASE_CONTAINER=jupyter/base-notebook
 FROM $BASE_CONTAINER
-COPY pycoa .
-COPY coabook .
+RUN git clone https://github.com/coa-project/pycoa.git 
+RUN git clone https://github.com/coa-project/coabook.git
 
 LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
 
