@@ -1,16 +1,6 @@
-FROM alpine:3.13
+FROM snakepacker/python:all as builder
 
-# This hack is widely applied to avoid python printing issues in docker containers.
-# See: https://github.com/Docker-Hub-frolvlad/docker-alpine-python3/pull/13
-ENV PYTHONUNBUFFERED=1
-
-RUN echo "**** install Python ****" && \
-    apk add --no-cache python3 && \
-    if [ ! -e /usr/bin/python ]; then ln -sf python3 /usr/bin/python ; fi && \
-    \
-    echo "**** install pip ****" && \
-    python3 -m ensurepip && \
-    rm -r /usr/lib/python*/ensurepip && \
-    pip3 install --no-cache --upgrade pip setuptools wheel && \
-    if [ ! -e /usr/bin/pip ]; then ln -s pip3 /usr/bin/pip ; fi
-RUN curl -O https://raw.githubusercontent.com/coa-project/pycoa/main/setup.py
+# Create virtualenv on python 3.7
+# Target folder should be the same on the build stage and on the target stage
+RUN python3.7 -m venv /usr/share/python3/app
+RUN apt-get install git
