@@ -680,8 +680,8 @@ class CocoDisplay:
                     if len(input_field)>1:
                         leg = CocoDisplay.dict_shorten_loc(mypandas_filter.codelocation[0]) + ', ' + val
                     r = standardfig.line(x = 'date', y = val, source = ColumnDataSource(mypandas_filter),
-                                     #color = mypandas_filter.colors.iloc[i], line_width = 3,
-                                     color = self.scolors[i], line_width = 3,
+                                     color = mypandas_filter.colors.iloc[i], line_width = 3,
+                                     #color = self.scolors[i], line_width = 3,
                                      legend_label = leg,
                                      hover_line_width = 4, name=val, line_dash=line_style[i])
                     r_list.append(r)
