@@ -27,10 +27,12 @@ RUN apt-get update && apt-get install -yq --no-install-recommends \
     unzip \
     nano-tiny \
     git \
+    python3-pip \	
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/coa-project/pycoa.git 
 RUN git clone https://github.com/coa-project/coabook.git
+RUN pip install --upgrade setuptools
 RUN python pycoa/setup.py install 
 # Create alternative for nano -> nano-tiny
 RUN update-alternatives --install /usr/bin/nano nano /bin/nano-tiny 10
