@@ -2,8 +2,6 @@
 # Distributed under the terms of the Modified BSD License.
 ARG BASE_CONTAINER=jupyter/base-notebook
 FROM $BASE_CONTAINER
-RUN git clone https://github.com/coa-project/pycoa.git 
-RUN git clone https://github.com/coa-project/coabook.git
 
 LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
 
@@ -28,7 +26,11 @@ RUN apt-get update && apt-get install -yq --no-install-recommends \
     tzdata \
     unzip \
     nano-tiny \
+    git \	
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/coa-project/pycoa.git 
+RUN git clone https://github.com/coa-project/coabook.git
 
 # Create alternative for nano -> nano-tiny
 RUN update-alternatives --install /usr/bin/nano nano /bin/nano-tiny 10
