@@ -285,6 +285,8 @@ class GeoManager():
                     "Micronesia (Country)":"FSM",\
                     "Northern Cyprus":"CYP",\
                     "Curacao":"CUW",\
+                    "Faeroe Islands":"FRO",\
+                    "Vatican":"VAT"
                 })
         return [translation_dict.get(k,k) for k in w]
 
@@ -352,6 +354,7 @@ class GeoInfo():
                 'a supported field of GeoInfo(). Please see help or '
                 'the get_list_field() output.')
         return field+' : '+self._list_field[field]
+
 
     def add_field(self,**kwargs):
         """ this is the main function of the GeoInfo class. It adds to
@@ -681,7 +684,14 @@ class GeoCountry():
     _country_info_dict = {'FRA':'https://github.com/coa-project/coadata/raw/main/coacache/public.opendatasoft.com_912711563.zip',\
                     'USA':'https://alicia.data.socrata.com/api/geospatial/jhnu-yfrj?method=export&format=Original',\
                     'ITA':'https://raw.githubusercontent.com/openpolis/geojson-italy/master/geojson/limits_IT_provinces.geojson',\
-                    'IND':'https://raw.githubusercontent.com/deldersveld/topojson/master/countries/india/india-states.json'\
+                    'IND':'https://raw.githubusercontent.com/deldersveld/topojson/master/countries/india/india-states.json',\
+                    'DEU':'https://github.com/jgehrcke/covid-19-germany-gae/raw/master/geodata/DE-counties.geojson',\
+                    'ESP':'https://public.opendatasoft.com/explore/dataset/provincias-espanolas/download/?format=shp&timezone=Europe/Berlin&lang=en',\
+                    # missing some counties 'GBR':'https://opendata.arcgis.com/datasets/69dc11c7386943b4ad8893c45648b1e1_0.zip?geometry=%7B%22xmin%22%3A-44.36%2C%22ymin%22%3A51.099%2C%22xmax%22%3A39.487%2C%22ymax%22%3A59.78%2C%22type%22%3A%22extent%22%2C%22spatialReference%22%3A%7B%22wkid%22%3A4326%7D%7D&outSR=%7B%22latestWkid%22%3A27700%2C%22wkid%22%3A27700%7D',\
+                    'GBR':'https://opendata.arcgis.com/datasets/3a4fa2ce68f642e399b4de07643eeed3_0.geojson',\
+                    'BEL':'https://public.opendatasoft.com/explore/dataset/arrondissements-belges-2019/download/?format=shp&timezone=Europe/Berlin&lang=en',\
+                    'PRT':'https://github.com/coa-project/coadata/raw/main/coastore/concelhos.zip',\
+                    # (simplification of 'https://github.com/coa-project/coadata/raw/main'https://dados.gov.pt/en/datasets/r/59368d37-cbdb-426a-9472-5a04cf30fbe4',\
                     }
 
     _source_dict = {'FRA':{'Basics':_country_info_dict['FRA'],\
@@ -691,6 +701,12 @@ class GeoCountry():
                     'Subregion informations':'https://en.wikipedia.org/wiki/List_of_states_and_territories_of_the_United_States'},\
                     'ITA':{'Basics':_country_info_dict['ITA']},\
                     'IND':{'Basics':_country_info_dict['IND']},\
+                    'DEU':{'Basics':_country_info_dict['DEU']},\
+                    'ESP':{'Basics':_country_info_dict['ESP']},\
+                    'GBR':{'Basics':_country_info_dict['GBR'],'Regions':'http://geoportal1-ons.opendata.arcgis.com/datasets/0c3a9643cc7c4015bb80751aad1d2594_0.csv'},\
+                    'BEL':{'Basics':_country_info_dict['BEL']},\
+                    'PRT':{'Basics':_country_info_dict['PRT']},\
+                    #,'District':'https://raw.githubusercontent.com/JoaoFOliveira/portuguese-municipalities/master/municipalities.json'},\
                     }
 
     def __init__(self,country=None,**kwargs):
@@ -722,7 +738,7 @@ class GeoCountry():
 
         self._country_data_region=None
         self._country_data_subregion=None
-
+        self._municipality_region=None
         url=self._country_info_dict[country]
         # country by country, adapt the read file informations
 
@@ -737,7 +753,7 @@ class GeoCountry():
 
             # Reading information to get region flags and correct names of regions
             f_reg_flag=open(get_local_from_url(self._source_dict['FRA']['Region Flags'],0), 'r', encoding="utf8")
-            
+
             content_reg_flag = f_reg_flag.read()
             f_reg_flag.close()
             soup_reg_flag = bs4.BeautifulSoup(content_reg_flag,'lxml')
@@ -868,6 +884,9 @@ class GeoCountry():
                 'reg_istat_code':'code_region',\
                 },
                 inplace=True)
+            self._country_data['name_region'] = self._country_data['name_region'].replace({
+            'Valle d\'Aosta/Vallée d\'Aoste':'Valle d\'Aosta',
+            'Trentino-Alto Adige/Südtirol':'Trentino-Alto Adige', 'Friuli-Venezia Giulia':'Friuli Venezia Giulia'})
             self._country_data.drop(['prov_istat_code_num','reg_istat_code_num','prov_istat_code'],axis=1,inplace=True)
 
         # --- 'IND' case ---------------------------------------------------------------------------------------
@@ -889,6 +908,109 @@ class GeoCountry():
             self._country_data['code_region'] = self._country_data['code_subregion']
             self._country_data.drop(['ISO','NAME_0','ID_1','TYPE_1','ENGTYPE_1','id'],axis=1,inplace=True)
 
+        # --- 'DEU' case ---------------------------------------------------------------------------------------
+        elif self._country == 'DEU':
+            self._country_data = gpd.read_file(get_local_from_url(url,0)) # this is a geojson file
+            self._country_data.rename(columns={\
+                'GEN':'name_subregion',\
+                'AGS':'code_subregion',\
+                },
+                inplace=True)
+            # See https://www.ioer-monitor.de/en/methodology/glossary/o/official-municipality-key-ags/ for decoding information of region code
+            self._country_data['code_region'] = (self._country_data.code_subregion.astype(int)//1000).astype(str).str.zfill(2)
+            h_deu=pd.read_html(get_local_from_url('https://de.zxc.wiki/wiki/Amtlicher_Gemeindeschl%C3%BCssel',0))[3]
+            h_deu['id']=h_deu['#'].str.slice(stop=2)
+            h_deu['name_region']=h_deu['country']
+            self._country_data=self._country_data.merge(h_deu,how='left',left_on='code_region',right_on='id')
+            self._country_data['code_subregion']=self._country_data.code_subregion.astype(int).astype(str)
+            self._country_data=self._country_data[['name_subregion','code_subregion','name_region','code_region','geometry']]
+            disso = self._country_data[['name_subregion','geometry']].dissolve(by='name_subregion', aggfunc='sum').reset_index()
+            # aggregate geometry with the same subregion name # some code subregion is lost somehow
+            self._country_data = self._country_data.drop_duplicates(subset = ['name_subregion'])
+            self._country_data = pd.merge(self._country_data.drop(columns=['geometry']),disso, on='name_subregion')
+
+        # --- 'ESP' case ---------------------------------------------------------------------------------------
+        elif self._country == 'ESP':
+            self._country_data = gpd.read_file('zip://'+get_local_from_url(url,0,'.zip'),encoding='utf-8') # this is shapefile file
+            self._country_data.rename(columns={\
+                'ccaa':'name_region',\
+                'cod_ccaa':'code_region',\
+                'provincia':'name_subregion',\
+                'codigo':'code_subregion'},inplace=True)
+            self._country_data.drop(['texto'],axis=1,inplace=True)
+
+        # --- 'GBR' case ---------------------------------------------------------------------------------------
+        elif self._country == 'GBR':
+            self._country_data = gpd.read_file(get_local_from_url(url,0))
+            reg_england=pd.read_csv(get_local_from_url(self._source_dict['GBR']['Regions'],0))
+            reg_adding_dict={
+                'E07000245':('E12000006','East of England'), # West Suffolk in East of England
+                'E07000244':('E12000006','East of England'), # East Suffolk in East of England
+                'E06000059':('E12000009','South West'), # Dorset in South West
+                'E06000058':('E12000009','South West'), # Bournemouth, Christchurch and Poole in South West
+                'E07000246':('E12000009','South West'), # Somerset West and Taunton in South West
+            }
+            for k,v in reg_adding_dict.items():
+                reg_england=reg_england.append({'LAD18CD':k,'RGN18CD':v[0],'RGN18NM':v[1]},ignore_index=True)
+
+            self._country_data=self._country_data.merge(reg_england,how='left',left_on='lad19cd',right_on='LAD18CD')
+            self._country_data.rename(columns={\
+                'lad19nm':'name_subregion',\
+                'lad19cd':'code_subregion',\
+                'RGN18CD':'code_region',\
+                'RGN18NM':'name_region',\
+                },inplace=True)
+            self._country_data.loc[self._country_data.code_region.isnull(),'code_region'] = \
+                self._country_data[self._country_data.code_region.isnull()].code_subregion.str.slice(stop=1)
+            dict_region={\
+                'E':'England',\
+                'W':'Wales',\
+                'S':'Scotland',\
+                'N':'Northern Ireland'\
+                }
+            self._country_data.loc[self._country_data.code_region.isin(list(dict_region.keys())),'name_region'] = \
+                [dict_region[x] for x in self._country_data.code_region if x in list(dict_region.keys())]
+            self._country_data=self._country_data[['name_subregion','code_subregion','geometry','code_region','name_region']]
+            # modifying projection
+            self._country_data['geometry']=self._country_data.geometry.to_crs('epsg:4326')
+        # --- 'BEL' case --------------------------------------------------------------------------------------------
+        elif self._country == 'BEL':
+            self._country_data = gpd.read_file('zip://'+get_local_from_url(url,0,'.zip'),encoding='utf-8') # this is shapefile file
+            self._country_data.rename(columns={\
+                'nom_arrondi':'name_subregion',\
+                'niscode':'code_subregion',\
+                'prov_code':'code_region'},inplace=True)
+            p=[]
+            for index,row in self._country_data.iterrows():
+                if row.prov_name_f is not None:
+                    p0=row.prov_name_f
+                elif row.prov_name_n is not None:
+                    p0=row.prov_name_n
+                else:
+                    p0=row.region
+                p.append(p0)
+            self._country_data['name_region']=p
+            self._country_data.loc[self._country_data.code_region.isnull(),'code_region']='00000'
+            self._country_data=self._country_data[['name_subregion','code_subregion','name_region','code_region','geometry']]
+            self._country_data['geometry']=self._country_data.geometry.to_crs('epsg:4326')
+        # --- 'PRT' case --------------------------------------------------------------------------------------------
+        elif self._country == 'PRT':
+            self._country_data = gpd.read_file('zip://'+get_local_from_url(url,0,'.zip'))
+            #self._district=pd.read_json(self._source_dict['PRT']['District'])[['name','district']].dropna()
+
+            self._country_data.rename(columns={\
+                'NAME_2':'name_subregion',\
+                'NAME_1':'name_region',\
+                'HASC_2':'code_subregion'},inplace=True)
+            self._country_data['code_region']=self._country_data.code_subregion.str.slice(stop=5)
+            self._country_data=self._country_data[['name_subregion','code_subregion','name_region','code_region','geometry']]
+
+    # def get_region_from_municipality(self,lname):
+    #     """  Return region list from a municipality list
+    #     """
+    #     if not isinstance(lname, list):
+    #         lname=[lname]
+    #     return self._municipality_region.loc[self._municipality_region.name.isin(lname)]['district'].to_list()
 
     def get_source(self):
         """ Return informations about URL sources
@@ -941,12 +1063,16 @@ class GeoCountry():
     def get_subregions_from_region(self,**kwargs):
         """ Return the list of subregions within a specified region.
         Should give either the code or the name of the region as strings in kwarg : code=# or name=#
+        Output default is 'code' of subregions. Can be changer with output='name'.
         """
-        kwargs_test(kwargs,['name','code'],'Should give either name or code of region.')
+        kwargs_test(kwargs,['name','code','output'],'Should give either name or code of region. Output can be changed with the output option.')
         code=kwargs.get("code",None)
         name=kwargs.get("name",None)
+        out=kwargs.get("output",'code')
         if not (code == None) ^ (name == None):
             raise CoaKeyError("Should give either code or name of region, not both.")
+        if not out in ['code','name']:
+            raise CoaKeyError("Should set output either as 'code' or 'name' for subregions.")
 
         if name != None:
             if not isinstance(name,str):
@@ -962,17 +1088,18 @@ class GeoCountry():
                 raise CoaWhereError("The region "+code+" does not exist for country "+self.get_country()+". See get_region_list().")
             cut=(self.get_data(True)['code_region']==code)
 
-        return self.get_data(True)[cut]['code_subregion'].iloc[0]#.to_list()
+        return self.get_data(True)[cut][out+'_subregion'].iloc[0]#.to_list()
 
-    def get_subregions_from_list_of_region_names(self,l):
-        """ Return the list of subregions according to list of region names given
+    def get_subregions_from_list_of_region_names(self,l,output='code'):
+        """ Return the list of subregions according to list of region names given.
+        The output argument ('code' as default) is given to the get_subregions_from_region function.
         """
         if not isinstance(l,list):
             CoaTypeError("Should provide list as argument")
         s=[]
         for r in l:
             try:
-                s=s+self.get_subregions_from_region(name=r)
+                s=s+self.get_subregions_from_region(name=r,output=output)
             except CoaWhereError:
                 pass
         return s
@@ -984,7 +1111,8 @@ class GeoCountry():
             return sorted(self._country_data.columns.to_list())
 
     def get_data(self,region_version=False):
-        """Return the whole geopandas data
+        """Return the whole geopandas data.
+        If region_version = True (not default), the pandas output is region based focalized.
         """
         if self.test_is_init():
             if region_version:
@@ -997,22 +1125,50 @@ class GeoCountry():
                             col.append(p)
                     if not 'code_subregion' in col:
                         col.append('code_subregion') # to get the list of subregion in region
+                    if not 'name_subregion' in col:
+                        col.append('name_subregion') # to get the list of subregion name in region
 
                     pr=self._country_data[col].copy()
 
                     # Country specific management
                     if self.get_country()=='FRA': # manage pseudo 'FRA' regions 'Métropole' and 'Outre-mer'
-                        metropole_codes=pr.code_region.astype(int)>=10
-                        outremer_codes=pr.code_region.astype(int)<10
-
-                        pr_metropole=pr[pr.code_region.astype(int)>=10].copy()
-                        pr_metropole['code_region']='100'
+                        metropole_cut=pr.code_region.astype(int)>=10
+                        pr_metropole=pr[metropole_cut].copy()
+                        pr_metropole['code_region']='999'
                         pr_metropole['name_region']='Métropole'
                         pr_metropole['flag_region']=''
 
-                        pr_outremer=pr[pr.code_region.astype(int)<10].copy()
+                        pr_outremer=pr[~metropole_cut].copy()
                         pr_outremer['code_region']='000'
                         pr_outremer['name_region']='Outre-mer'
+                        pr_outremer['flag_region']=''
+
+                        pr=pr.append(pr_metropole,ignore_index=True).append(pr_outremer,ignore_index=True)
+
+                    elif self.get_country()=='ESP' : # manage pseudo 'ESP' regions within and outside continent
+                        islands_cut=pr.code_region.astype(int).isin(['05'])
+                        pr_metropole=pr[~islands_cut].copy()
+                        pr_metropole['code_region']='99'
+                        pr_metropole['name_region']='España peninsular'
+                        pr_metropole['flag_region']=''
+
+                        pr_outremer=pr[islands_cut].copy()
+                        pr_outremer['code_region']='00'
+                        pr_outremer['name_region']='Islas españolas'
+                        pr_outremer['flag_region']=''
+
+                        pr=pr.append(pr_metropole,ignore_index=True).append(pr_outremer,ignore_index=True)
+
+                    elif self.get_country()=='PRT' : # manage pseudo 'PRT' regions within and outside continent
+                        islands_cut=pr.code_region.isin(['PT.AC','PT.MA'])
+                        pr_metropole=pr[~islands_cut].copy()
+                        pr_metropole['code_region']='PT.99'
+                        pr_metropole['name_region']='Portugal continental'
+                        pr_metropole['flag_region']=''
+
+                        pr_outremer=pr[islands_cut].copy()
+                        pr_outremer['code_region']='PT.00'
+                        pr_outremer['name_region']='Ilhas portuguesas'
                         pr_outremer['flag_region']=''
 
                         pr=pr.append(pr_metropole,ignore_index=True).append(pr_outremer,ignore_index=True)
@@ -1024,6 +1180,7 @@ class GeoCountry():
                         pr=pr[usa_col]
 
                     pr['code_subregion']=pr.code_subregion.apply(lambda x: [x])
+                    pr['name_subregion']=pr.name_subregion.apply(lambda x: [x])
                     self._country_data_region=pr.dissolve(by=col_reg,aggfunc='sum').sort_values(by='code_region').reset_index()
                 return self._country_data_region
             else:

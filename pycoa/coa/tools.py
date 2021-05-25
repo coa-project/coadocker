@@ -45,16 +45,22 @@ if _coacache_module_info != None:
 _verbose_mode = 1 # default
 
 # Known db
-_db_list_dict = {'jhu': 'WW',
-    'owid': 'WW',
-    'jhu-usa': 'USA',
-    'spf': 'FRA',
-    'spfnational': 'WW',
-    'opencovid19': 'FRA',
-    'opencovid19national': 'WW',
-    'dpc': 'ITA',
-    'covidtracking': 'USA',
-    'covid19india': 'IND'}
+_db_list_dict = {'jhu': ['WW','nation'],
+    'owid': ['WW','nation'],
+    'jhu-usa': ['USA','subregion'],
+    'spf': ['FRA','subregion'],
+    'spfnational': ['spfnat','nation'],
+    'opencovid19': ['FRA','subregion'],
+    'opencovid19national': ['WW','nation'],
+    'dpc': ['ITA','region'],
+    'covidtracking': ['USA','subregion'],
+    'covid19india': ['IND','region'],
+    'rki':['DEU','subregion'],
+    'escovid19data':['ESP','subregion'],
+    'phe':['GBR','subregion'],
+    'sciensano':['BEL','region'],
+    'dgs':['PRT','region'],
+    'obepine':['FRA','region']}
 
 # ----------------------------------------------------
 # --- Usefull functions for pycoa --------------------
@@ -63,6 +69,7 @@ _db_list_dict = {'jhu': 'WW',
 def get_db_list_dict():
     """Return db list dict"""
     return _db_list_dict
+
 
 def get_verbose_mode():
     """Return the verbose mode
@@ -130,8 +137,8 @@ def fill_missing_dates(p, date_field='date', loc_field='location', d1=None, d2=N
 
     idx = pandas.date_range(d1, d2, freq = "D")
     idx = idx.date
-    all_loc=list(p[loc_field].unique())
 
+    all_loc=list(p[loc_field].unique())
     pfill=pandas.DataFrame()
     for l in all_loc:
         pp=p[p[loc_field]==l]
@@ -139,8 +146,8 @@ def fill_missing_dates(p, date_field='date', loc_field='location', d1=None, d2=N
         pp2.index = pandas.DatetimeIndex(pp2.index)
         pp3 = pp2.reindex(idx,fill_value=numpy.nan)#pandas.NA)
         pp3['location'] = pp3['location'].fillna(l)  #pp3['location'].fillna(method='bfill')
-        pp3['codelocation'] = pp3['codelocation'].fillna(method='bfill')
-        pp3['codelocation'] = pp3['codelocation'].fillna(method='ffill')
+        #pp3['codelocation'] = pp3['codelocation'].fillna(method='bfill')
+        #pp3['codelocation'] = pp3['codelocation'].fillna(method='ffill')
         pfill=pandas.concat([pfill, pp3])
     pfill.reset_index(inplace=True)
     return pfill
@@ -210,11 +217,22 @@ def extract_dates(when):
 
     return w0,w1
 
-def rollingweek_to_middledate(whenstr):
-    firstday = datetime.date(int(whenstr.split('-')[0]),int(whenstr.split('-')[1]),int(whenstr.split('-')[2]))
-    lastday  = datetime.date(int(whenstr.split('-')[3]),int(whenstr.split('-')[4]),int(whenstr.split('-')[5]))
-    return firstday + (lastday - firstday)/2
-
+def week_to_date(whenstr):
+    """
+    convert week to date.
+    2 cases:
+    - Rolling week
+        if format is Y-M-D-Y-M-D: return middle dates
+    - One week data Wnumber: return monday correction to the week number
+    """
+    conservation=0
+    if len(whenstr) == 21:
+        firstday = datetime.date(int(whenstr.split('-')[0]),int(whenstr.split('-')[1]),int(whenstr.split('-')[2]))
+        lastday  = datetime.date(int(whenstr.split('-')[3]),int(whenstr.split('-')[4]),int(whenstr.split('-')[5]))
+        convertion = firstday + (lastday - firstday)/2
+    else:
+        convertion = datetime.datetime.strptime(whenstr + '-1', "%Y-S%W-%w") + datetime.timedelta(days=7)
+    return convertion
 
 def get_local_from_url(url,expiration_time=0,suffix=''):
     """"Download data from the given url and store it into a local file.

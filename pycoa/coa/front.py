@@ -210,6 +210,23 @@ def getwhom():
 # ----------------------------------------------------------------------
 # --- get(**kwargs) ----------------------------------------------------
 # ----------------------------------------------------------------------
+
+def getinfo(which):
+    """
+        Return keyword_definition for the db selected
+    """
+    #if not which:
+        #which = listwhich()[0]
+    #    print('Load default which:',which)
+    #elif which not in listwhich():
+    #    raise CoaKeyError('Which option ' + which + ' not supported. '
+    #                                                'See listwhich() for list.')
+    print(_db.get_keyword_definition(which),'\nurl:', _db.get_keyword_url(which)[0],'\n(more info ',_db.get_keyword_url(which)[1],')')
+
+# ----------------------------------------------------------------------
+# --- get(**kwargs) ----------------------------------------------------
+# ----------------------------------------------------------------------
+
 def get(**kwargs):
     """Return covid19 data in specified format output (default, by list)
     for specified locations ('where' keyword).
@@ -372,8 +389,8 @@ def decoplot(func):
         if isinstance(input_arg, pd.DataFrame):
             t = input_arg
             input_field = kwargs.get('input_field', listwhich()[0])
-            if not all([i in t.columns for i in input_field]):
-            #if input_field not in t.columns:
+            #if not all([i in t.columns for i in input_field]):
+            if input_field not in t.columns:
                 raise CoaKeyError("Cannot find " + str(input_field) + " field in the pandas data. "
                                                                       "Set a proper input_field key.")
             if 'option' in kwargs:
@@ -553,8 +570,14 @@ def deco_pycoa_graph(f):
 
 @deco_pycoa_graph
 def map(**kwargs):
-    """Create a map according to arguments and options.
+    """
+    Create a map according to arguments and options.
     See help(hist).
+    - 2 types of visu are avalailable so far : bokeh or folium (see listvisu())
+    by default visu='bokeh'
+    - In the default case (i.e visu='bokeh') available option are :
+        - dateslider=True: a date slider is called and displayed on the right part of the map
+        - maplabel=True: value are displayed directly on the map
     """
     visu = kwargs.get('visu', listvisu()[0])
     t = kwargs.pop('t')
