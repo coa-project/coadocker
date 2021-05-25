@@ -5,6 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath('pycoa'))
+import coa
 
 if not hasattr(importlib, 'reload'):
     importlib.reload = reload  # for Python 2 compatibility
