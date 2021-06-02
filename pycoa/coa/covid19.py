@@ -103,7 +103,6 @@ class DataBase(object):
                     url='https://www.data.gouv.fr/es/datasets/r/ba71be57-5932-4298-81ea-aff3a12a440c'
                     rename_dict={'Code_Region':'location','Date':'date','Indicateur':'idx_obepine'}
                     obepine_data=self.csv2pandas(url,separator=';',rename_columns=rename_dict)
-                    obepine_data['location']=obepine_data.location.astype(str)
                     self.return_structured_pandas(obepine_data,columns_keeped=['idx_obepine'])
                 elif self.db == 'escovid19data': # ESP
                     info('ESP, EsCovid19Data ...')
@@ -163,8 +162,8 @@ class DataBase(object):
                 elif self.db == 'phe': # GBR from https://coronavirus.data.gov.uk/details/download
                     info('GBR, Public Health England data ...')
                     rename_dict = { 'areaCode':'location',\
-                        'cumDeathsByDeathDate':'tot_deaths',\
-                        'cumCasesBySpecimenDate':'tot_cases',\
+                        'cumDeathsByDeathDate':'cur_deaths',\
+                        'cumCasesBySpecimenDate':'cur_cases',\
                         #'covidOccupiedMVBeds':'cur_icu',\
                         #'cumPeopleVaccinatedFirstDoseByVaccinationDate':'tot_dose1',\
                         #'cumPeopleVaccinatedSecondDoseByVaccinationDate':'tot_dose2',\
@@ -175,12 +174,20 @@ class DataBase(object):
                         if w not in ['areaCode']:
                             url=url+'&metric='+w
                     url=url+'&format=csv'
-
                     gbr_data=self.csv2pandas(url,separator=',',rename_columns=rename_dict)
+
+                    gbrvar = pd.read_csv('https://covid-surveillance-data.cog.sanger.ac.uk/download/lineages_by_ltla_and_week.tsv',sep='\t')
+                    varname =  'B.1.617.2'
+                    gbrvar[varname]=gbrvar.loc[gbrvar.Lineage==varname]['Count'].cumsum()
+                    gbrvar=gbrvar.drop(columns='Count').rename(columns={'WeekEndDate':'date','LTLA':'location'})
+                    gbrvar['date']= [ week_to_date(i) for i in gbrvar['date'] ]
+                    gbrvar['date'] = pd.to_datetime(gbrvar['date'],errors='coerce').dt.date
+
+                    gbr_data = pd.merge(gbr_data,gbrvar,on=['location','date']).drop(columns='Lineage')
                     columns_keeped = list(rename_dict.values())
+                    columns_keeped.append(varname)
                     columns_keeped.remove('location')
                     self.return_structured_pandas(gbr_data,columns_keeped=columns_keeped)
-
                 elif self.db == 'covid19india': # IND
                     info('COVID19India database selected ...')
                     rename_dict = {'Date': 'date', 'State': 'location'}
@@ -233,10 +240,20 @@ class DataBase(object):
                     self.return_structured_pandas(ctusa, columns_keeped = columns_keeped)
                 elif self.db == 'spf' or self.db == 'spfnational':
                     if self.db == 'spfnational':
-                        info('SPF aka Sante Publique France database selected (France granularity) ...')
-                        spf = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/d3a98a30-893f-47f7-96c5-2f4bcaaa0d71", separator = ',')
-                        spf['total_deces_ehpad']=pd.to_numeric(spf['total_deces_ehpad'], errors = 'coerce')
-                        self.return_structured_pandas(spf) # with 'tot_dc' first
+                        rename_dict = {
+                        'patients_reanimation':'cur_reanimation',
+                        'patients_hospitalises':'cur_hospitalises'
+                        }
+                        columns_keeped = ['cur_reanimation','cur_hospitalises',
+                        'total_cas_confirmes','total_deces_hopital','total_patients_gueris',
+                        'total_deces_ehpad','total_cas_confirmes_ehpad','total_cas_possibles_ehpad']
+
+                        spfnat = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/d3a98a30-893f-47f7-96c5-2f4bcaaa0d71",
+                        rename_columns = rename_dict, separator = ',')
+                        colcast=[i for i in columns_keeped]
+
+                        spfnat[colcast]=pd.to_numeric(spfnat[colcast].stack(),errors = 'coerce').unstack()
+                        self.return_structured_pandas(spfnat, columns_keeped=columns_keeped) # with 'tot_dc' first
                     else:
                         info('SPF aka Sante Publique France database selected (France departement granularity) ...')
                         info('... Seven different databases from SPF will be parsed ...')
@@ -394,7 +411,7 @@ class DataBase(object):
                         self.return_structured_pandas(result,columns_keeped=columns_keeped) # with 'tot_dc' first
                 elif self.db == 'opencovid19' or  self.db == 'opencovid19national':
                     rename={'maille_code':'location'}
-                    cast={'source_url':str,'source_archive':str,'source_type':str}
+                    cast={'source_url':str,'source_archive':str,'source_type':str,'nouvelles_hospitalisations':str,'nouvelles_reanimations':str}
                     if self.db == 'opencovid19':
                         info('OPENCOVID19 (country granularity) selected ...')
                         drop_field  = {'granularite':['pays','monde','region']}
@@ -419,8 +436,6 @@ class DataBase(object):
                         'hospitalises':'cur_hospitalises',
                         'gueris':'tot_gueris'
                         }
-
-
                     opencovid19 = self.csv2pandas('https://raw.githubusercontent.com/opencovid19-fr/data/master/dist/chiffres-cles.csv',
                                 drop_field=drop_field,rename_columns=rename,separator=',',cast=cast)
 
@@ -429,11 +444,12 @@ class DataBase(object):
                     if self.db == 'opencovid19national':
                         opencovid19 = opencovid19.loc[~opencovid19.granularite.isin(['collectivite-outremer'])]
 
-                    column_to_integrate=['nouvelles_hospitalisations', 'nouvelles_reanimations', 'depistes']
-                    for w in ['nouvelles_hospitalisations', 'nouvelles_reanimations', 'depistes']:
+                    column_to_integrate=['nouvelles_hospitalisations', 'nouvelles_reanimations']
+                    opencovid19[column_to_integrate]=pd.to_numeric(opencovid19[column_to_integrate].stack(),errors = 'coerce').unstack()
+
+                    for w in ['nouvelles_hospitalisations', 'nouvelles_reanimations']:
                         opencovid19['tot_'+w]=opencovid19.groupby(['location'])[w].cumsum()
                     #columns_skipped = ['granularite','maille_nom','source_nom','source_url','source_archive','source_type']
-
                     self.return_structured_pandas(opencovid19.rename(columns=dict_columns_keeped),columns_keeped=list(dict_columns_keeped.values())+['tot_'+c for c in column_to_integrate])
                 elif self.db == 'owid':
                     info('OWID aka \"Our World in Data\" database selected ...')
@@ -704,7 +720,7 @@ class DataBase(object):
         pandas_db['date'] = pandas.to_datetime(pandas_db['date'],errors='coerce').dt.date
         #self.dates  = pandas_db['date']
         if self.db == 'spfnational':
-            pandas_db['location'] = ['France']*len(pandas_db)
+            pandas_db['location'] = 'France'
         pandas_db = pandas_db.sort_values(['location','date'])
         if self.db == 'owid':
             pandas_db = pandas_db.loc[~pandas_db.iso_code.isnull()]
@@ -763,15 +779,12 @@ class DataBase(object):
             sub2reg = collections.OrderedDict(zip(uniqloc,list(gd.loc[gd.name_subregion.isin(uniqloc)]['name_region'])))
             mypandas['location'] = mypandas['location'].map(sub2reg)
             mypandas = mypandas.loc[~mypandas.location.isnull()]
-        if self.db == 'obepine': # filling subregions.
-            gd = self.geo.get_data()[['code_subregion','name_region']]
-            #preg=self.geo.get_data(True)[['code_subregion','code_region']]
+
+         # filling subregions.
+            gd = self.geo.get_data()[['code_region','name_region']]
+
             uniqloc = list(mypandas['location'].unique())
-            sub2reg = collections.OrderedDict(zip(uniqloc,list(gd.loc[gd.code_subregion.isin(uniqloc)]['name_region'])))
-            #mypandas=mypandas.merge(preg,how='left',left_on='location',right_on='code_region')
-            #mypandas = mypandas.explode('code_subregion')
-            #mypandas['location'] = mypandas['code_subregion']
-            mypandas['location'] = mypandas['location'].map(sub2reg)
+            name2code = collections.OrderedDict(zip(uniqloc,list(gd.loc[gd.name_region.isin(uniqloc)]['code_region'])))
             mypandas = mypandas.loc[~mypandas.location.isnull()]
 
         codename = None
@@ -782,17 +795,24 @@ class DataBase(object):
             self.slocation = list(codename.values())
             location_is_code = True
         else:
-            if self.database_type[self.db][1] == 'region':
+            if self.database_type[self.db][1] == 'region' and self.db != 'obepine':
                 if self.db == 'covid19india':
                     mypandas = mypandas.loc[~mypandas.location.isnull()]
                     uniqloc = list(mypandas['location'].unique())
                 temp = self.geo.get_region_list()[['code_region','name_region']]
                 codename = collections.OrderedDict(zip(uniqloc,list(temp.loc[temp.name_region.isin(uniqloc)]['code_region'])))
                 self.slocation = uniqloc
+            elif  self.database_type[self.db][1] == 'region' and self.db == 'obepine':
+                 temp = self.geo.get_region_list()[['code_region','name_region']]
+                 mypandas['location'] = mypandas['location'].astype(str)
+                 uniqloc = list(mypandas['location'].unique())
+                 codename = collections.OrderedDict(zip(uniqloc,list(temp.loc[temp.code_region.isin(uniqloc)]['name_region'])))
+                 self.slocation = list(codename.values())
+                 location_is_code = True
 
             elif self.database_type[self.db][1] == 'subregion':
                 temp = self.geo_all[['code_subregion','name_subregion']]
-                if self.db in ['phe','covidtracking','spf','escovid19data','obepine']:
+                if self.db in ['phe','covidtracking','spf','escovid19data','opencovid19']:
                     codename = collections.OrderedDict(zip(uniqloc,list(temp.loc[temp.code_subregion.isin(uniqloc)]['name_subregion'])))
                     self.slocation = list(codename.values())
                     location_is_code = True
@@ -801,26 +821,11 @@ class DataBase(object):
                     self.slocation = uniqloc
             else:
                 CoaDbError('Granularity problem , neither region nor sub_region ...')
-            #self.slocation = loc_sub_code
-            #oldloc = loc_sub_name
-            #newloc = loc_sub_code
-            #toremove = [x for x in uniqloc if x not in loc_sub_name]
-            #codedico={i:j for i,j in zip(loc_sub_code,newloc)}
-        #tmp = pd.DataFrame()
 
         if self.db == 'dgs':
             mypandas = mypandas.reset_index(drop=True)
-            #mypandas['location'] = mypandas['location'].apply(lambda x: x.title().replace('Do', 'do').replace('Da','da').replace('De','de'))
-            #uniqloc = list(mypandas.location.unique())
-            #a=self.geo.get_data()
-            #subreg=a.loc[a.name_subregion.isin(uniqloc)][['name_subregion','name_region']].rename(columns={'name_subregion':'location'})
-            #mypandas['region'] = mypandas['location'].map(dict(zip(subreg.location, subreg.name_region)))
-            #mypandas = mypandas.drop(columns=['location'])
-            #mypandas = mypandas.rename(columns={'region':'location'})
-        #if len(oldloc) != len(newloc):
-        #    raise CoaKeyError('Seems to be an iso3 problem behaviour ...')
-        #mypandas = mypandas.replace(oldloc,newloc)
-        mypandas = mypandas.groupby(['location','date']).sum(min_count=1).reset_index() # summing in case of multiple dates (e.g. in opencovid19 data). But keep nan if any
+        if self.db != 'spfnational':
+            mypandas = mypandas.groupby(['location','date']).sum(min_count=1).reset_index() # summing in case of multiple dates (e.g. in opencovid19 data). But keep nan if any
         mypandas = fill_missing_dates(mypandas)
 
         if location_is_code:
@@ -989,6 +994,7 @@ class DataBase(object):
             else:
                 location_exploded = self.geo.to_standard(listloc,output='list',interpret_region=True)
         else:
+
             def codetoname(listloc):
                 convertname = []
                 a=self.geo.get_data()
@@ -1000,6 +1006,7 @@ class DataBase(object):
                     else:
                         convertname.append(i)
                 return convertname
+
             name_regions = []
             if origlistlistloc != None:
                 name_regions  = origlistlistloc
@@ -1022,11 +1029,9 @@ class DataBase(object):
                 location_exploded = [ self.geo.get_subregions_from_list_of_region_names([i],output='name')\
                             if len(self.geo.get_subregions_from_list_of_region_names([i],output='name'))>0 else i \
                             for i in listloc]
-                if self.db == 'dpc' or self.db == 'sciensano':
+                if self.db == 'dpc' or self.db == 'sciensano' or self.db == 'obepine':
                     location_exploded = listloc
                 location_exploded = self.flat_list(location_exploded)
-
-
         def sticky(lname):
             if len(lname)>0:
                 tmp=''
@@ -1051,10 +1056,13 @@ class DataBase(object):
                     pdcluster = pdcluster.append(tmp)
                 j+=1
             pdfiltered = pdcluster[['location','date','codelocation',kwargs['which'],'clustername']]
+
         else:
             pdfiltered = self.get_mainpandas().loc[self.get_mainpandas().location.isin(location_exploded)]
             pdfiltered = pdfiltered[['location','date','codelocation',kwargs['which']]]
             pdfiltered['clustername'] = pdfiltered['location'].copy()
+
+
         # deal with options now
         option = kwargs.get('option', '')
         fillnan = True # default
