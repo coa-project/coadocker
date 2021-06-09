@@ -21,9 +21,10 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 import sys
-from coa.tools import info, verb, kwargs_test, get_local_from_url, fill_missing_dates, check_valid_date, rollingweek_to_middledate, get_db_list_dict
+from coa.tools import info, verb, kwargs_test, get_local_from_url, fill_missing_dates, check_valid_date, week_to_date, get_db_list_dict
 
 import coa.geo as coge
+import coa.dbinfo as report
 import coa.display as codisplay
 from coa.error import *
 from scipy import stats as sps
@@ -34,7 +35,7 @@ class DataBase(object):
    """
    DataBase class
    Parse a Covid-19 database and filled the pandas python objet : mainpandas
-   It takes a string argument, which can be: 'jhu','spf','owid', 'opencovid19' and 'opencovid19national'
+   It takes a string argument, which can be: 'jhu','spf', 'spfnational','owid', 'opencovid19' and 'opencovid19national'
    """
    def __init__(self, db_name):
         """
@@ -51,6 +52,7 @@ class DataBase(object):
         self.set_display(self.db)
         self.database_url = []
         self.db_world=None
+        self.geoinfo = report
         if self.db not in self.database_name:
             raise CoaDbError('Unknown ' + self.db + '. Available database so far in PyCoa are : ' + str(self.database_name), file=sys.stderr)
         else:
@@ -69,17 +71,51 @@ class DataBase(object):
                 if self.db == 'jhu':
                     info('JHU aka Johns Hopkins database selected ...')
                     self.return_jhu_pandas()
-                elif self.db == 'jhu-usa':
+                elif self.db == 'jhu-usa': #USA
                     info('USA, JHU aka Johns Hopkins database selected ...')
                     self.return_jhu_pandas()
-                elif self.db == 'dpc':
+                elif self.db == 'dpc': #ITA
                     info('ITA, Dipartimento della Protezione Civile database selected ...')
                     rename_dict = {'data': 'date', 'sigla_provincia': 'location', 'totale_casi': 'tot_casi'}
                     dpc1 = self.csv2pandas("https://github.com/pcm-dpc/COVID-19/raw/master/dati-province/dpc-covid19-ita-province.csv",\
                         rename_columns = rename_dict, separator=',')
                     columns_keeped = ['tot_casi']
                     self.return_structured_pandas(dpc1, columns_keeped=columns_keeped)
-                elif self.db == 'covid19india':
+                elif self.db == 'rki': # DEU
+                    info('DEU, Robert Koch Institut data selected ...')
+                    self.return_jhu_pandas()
+                elif self.db == 'escovid19data': # ESP
+                    info('ESP, EsCovid19Data ...')
+                    rename_dict = {'ine_code': 'location',\
+                        'deceased':'tot_deaths',\
+                        'cases_accumulated':'tot_cases',\
+                        'activos':'cur_cases',\
+                        'hospitalized':'cur_hosp',\
+                        'hospitalized_accumulated':'tot_hosp',\
+                        'intensive_care':'cur_icu',\
+                        'recovered':'tot_recovered',\
+                        'cases_per_cienmil':'cur_cases_per100k',\
+                        'intensive_care_per_1000000':'cur_icu_per1M',\
+                        'deceassed_per_100000':'tot_deaths_per100k',\
+                        'hospitalized_per_100000':'cur_hosp_per100k',\
+                    }
+                    #url='https://github.com/montera34/escovid19data/raw/master/data/output/covid19-provincias-spain_consolidated.csv'
+                    url='https://raw.githubusercontent.com/montera34/escovid19data/master/data/output/covid19-provincias-spain_consolidated.csv'
+                    col_names = pd.read_csv(url, nrows=0).columns
+                    cast={i:'string' for i in col_names[17:]}
+                    esp_data=self.csv2pandas(url,\
+                        separator=',',rename_columns = rename_dict,cast = cast)
+                    #print('Available columns : ')
+                    #display(esp_data.columns)
+                    esp_data['location']=esp_data.location.astype(str).str.zfill(2)
+                    columns_keeped = list(rename_dict.values())
+                    columns_keeped.remove('location')
+
+                    for w in list(columns_keeped):
+                            esp_data[w]=pd.to_numeric(esp_data[w], errors = 'coerce')
+
+                    self.return_structured_pandas(esp_data,columns_keeped=columns_keeped)
+                elif self.db == 'covid19india': # IND
                     info('COVID19India database selected ...')
                     rename_dict = {'Date': 'date', 'State': 'location'}
                     drop_field  = {'State': ['India', 'State Unassigned']}
@@ -129,149 +165,174 @@ class DataBase(object):
                     columns_keeped = list(rename_dict.values())
                     columns_keeped.remove('location') # is already expected
                     self.return_structured_pandas(ctusa, columns_keeped = columns_keeped)
-                elif self.db == 'spf':
-                    info('SPF aka Sante Publique France database selected ...')
+                elif self.db == 'spf' or self.db == 'spfnational':
+                    if self.db == 'spfnational':
+                        info('SPF aka Sante Publique France database selected (France granularity) ...')
+                        spf = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/d3a98a30-893f-47f7-96c5-2f4bcaaa0d71", separator = ',')
+                        spf['total_deces_ehpad']=pd.to_numeric(spf['total_deces_ehpad'], errors = 'coerce')
+                        self.return_structured_pandas(spf) # with 'tot_dc' first
+                    else:
+                        info('SPF aka Sante Publique France database selected (France departement granularity) ...')
+                        info('... Seven different databases from SPF will be parsed ...')
+                        # https://www.data.gouv.fr/fr/datasets/donnees-hospitalieres-relatives-a-lepidemie-de-covid-19/
+                        # Parse and convert spf data structure to JHU one for historical raison
+                        # hosp Number of people currently hospitalized
+                        # rea  Number of people currently in resuscitation or critical care
+                        # rad      Total amount of patient that returned home
+                        # dc       Total amout of deaths at the hospital
+                        # 'sexe' == 0 male + female
+                        cast = {'dep': 'string'}
+                        rename = {'jour': 'date', 'dep': 'location'}
+                        constraints = {'sexe': 0}
+                        spf1 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/63352e38-d353-4b54-bfd1-f1b3ee1cabd7",
+                                      rename_columns = rename, constraints = constraints, cast = cast)
 
-                    info('... Six differents db from SPF will be parsed ...')
-                    # https://www.data.gouv.fr/fr/datasets/donnees-hospitalieres-relatives-a-lepidemie-de-covid-19/
-                    # Parse and convert spf data structure to JHU one for historical raison
-                    # hosp Number of people currently hospitalized
-                    # rea  Number of people currently in resuscitation or critical care
-                    # rad      Total amount of patient that returned home
-                    # dc       Total amout of deaths at the hospital
-                    # 'sexe' == 0 male + female
-                    cast = {'dep': 'string'}
-                    rename = {'jour': 'date', 'dep': 'location'}
-                    constraints = {'sexe': 0}
-                    spf1 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/63352e38-d353-4b54-bfd1-f1b3ee1cabd7",
-                                  rename_columns = rename, constraints = constraints, cast = cast)
+                        # https://www.data.gouv.fr/fr/datasets/donnees-hospitalieres-relatives-a-lepidemie-de-covid-19/
+                        # All data are incidence. → integrated later in the code
+                        # incid_hosp	string 	Nombre quotidien de personnes nouvellement hospitalisées
+                        # incid_rea	integer	Nombre quotidien de nouvelles admissions en réanimation
+                        # incid_dc	integer	Nombre quotidien de personnes nouvellement décédées
+                        # incid_rad	integer	Nombre quotidien de nouveaux retours à domicile
+                        spf2 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/6fadff46-9efd-4c53-942a-54aca783c30c",
+                                      rename_columns = rename, cast = cast)
 
-                    # https://www.data.gouv.fr/fr/datasets/donnees-hospitalieres-relatives-a-lepidemie-de-covid-19/
-                    # All data are incidence. → integrated later in the code
-                    # incid_hosp	string 	Nombre quotidien de personnes nouvellement hospitalisées
-                    # incid_rea	integer	Nombre quotidien de nouvelles admissions en réanimation
-                    # incid_dc	integer	Nombre quotidien de personnes nouvellement décédées
-                    # incid_rad	integer	Nombre quotidien de nouveaux retours à domicile
-                    spf2 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/6fadff46-9efd-4c53-942a-54aca783c30c",
-                                  rename_columns = rename, cast = cast)
+                        # https://www.data.gouv.fr/fr/datasets/donnees-relatives-aux-resultats-des-tests-virologiques-covid-19/
+                        # T       Number of tests performed daily → integrated later
+                        # P       Number of positive tests daily → integrated later
+                        constraints = {'cl_age90': 0}
+                        spf3 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/406c6a23-e283-4300-9484-54e78c8ae675",
+                                      rename_columns = rename, constraints = constraints, cast = cast)
 
-                    # https://www.data.gouv.fr/fr/datasets/donnees-relatives-aux-resultats-des-tests-virologiques-covid-19/
-                    # T       Number of tests performed daily → integrated later
-                    # P       Number of positive tests daily → integrated later
-                    constraints = {'cl_age90': 0}
-                    spf3 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/406c6a23-e283-4300-9484-54e78c8ae675",
-                                  rename_columns = rename, constraints = constraints, cast = cast)
+                        # https://www.data.gouv.fr/fr/datasets/donnees-relatives-aux-personnes-vaccinees-contre-la-covid-19-1
+                        # Les données issues du système d’information Vaccin Covid permettent de dénombrer en temps quasi réel
+                        # (J-1), le nombre de personnes ayant reçu une injection de vaccin anti-covid en tenant compte du nombre
+                        # de doses reçues, de l’âge, du sexe ainsi que du niveau géographique (national, régional et
+                        # départemental).
+                        constraints = {'vaccin': 0} # 0 means all vaccines
+                        # previously : https://www.data.gouv.fr/fr/datasets/r/4f39ec91-80d7-4602-befb-4b522804c0af
+                        spf5 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/535f8686-d75d-43d9-94b3-da8cdf850634",
+                            rename_columns = rename, constraints = constraints, separator = ';', encoding = "ISO-8859-1", cast = cast)
 
-                    # https://www.data.gouv.fr/fr/datasets/donnees-relatives-aux-personnes-vaccinees-contre-la-covid-19-1
-                    # Les données issues du système d’information Vaccin Covid permettent de dénombrer en temps quasi réel
-                    # (J-1), le nombre de personnes ayant reçu une injection de vaccin anti-covid en tenant compte du nombre
-                    # de doses reçues, de l’âge, du sexe ainsi que du niveau géographique (national, régional et
-                    # départemental).
-                    # variables n_dose_1, n_dose_2
-                    constraints = {'vaccin': 0} # all vaccines
-                    # previously : https://www.data.gouv.fr/fr/datasets/r/4f39ec91-80d7-4602-befb-4b522804c0af
-                    spf5 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/535f8686-d75d-43d9-94b3-da8cdf850634",
-                        rename_columns = rename, constraints = constraints, separator = ';', encoding = "ISO-8859-1", cast = cast)
+                        # https://www.data.gouv.fr/fr/datasets/indicateurs-de-suivi-de-lepidemie-de-covid-19/#_
+                        # tension hospitaliere
+                        #'date', 'location', 'region', 'libelle_reg', 'libelle_dep', 'tx_incid',
+                        # 'R', 'taux_occupation_sae', 'tx_pos', 'tx_incid_couleur', 'R_couleur',
+                        # 'taux_occupation_sae_couleur', 'tx_pos_couleur', 'nb_orange',
+                        # 'nb_rouge']
+                        # Vert : taux d’occupation compris entre 0 et 40% ;
+                        # Orange : taux d’occupation compris entre 40 et 60% ;
+                        # Rouge : taux d'occupation supérieur à 60%.
+                        # R0
+                        # vert : R0 entre 0 et 1 ;
+                        # Orange : R0 entre 1 et 1,5 ;
+                        # Rouge : R0 supérieur à 1,5.
+                        cast = {'departement': 'string'}
+                        rename = {'extract_date': 'date', 'departement': 'location'}
+                        #columns_skipped=['region','libelle_reg','libelle_dep','tx_incid_couleur','R_couleur',\
+                        #'taux_occupation_sae_couleur','tx_pos_couleur','nb_orange','nb_rouge']
+                        spf4 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/4acad602-d8b1-4516-bc71-7d5574d5f33e",
+                                    rename_columns = rename, separator=',', encoding = "ISO-8859-1", cast=cast)
 
-                    # https://www.data.gouv.fr/fr/datasets/indicateurs-de-suivi-de-lepidemie-de-covid-19/#_
-                    # tension hospitaliere
-                    #'date', 'location', 'region', 'libelle_reg', 'libelle_dep', 'tx_incid',
-                    # 'R', 'taux_occupation_sae', 'tx_pos', 'tx_incid_couleur', 'R_couleur',
-                    # 'taux_occupation_sae_couleur', 'tx_pos_couleur', 'nb_orange',
-                    # 'nb_rouge']
-                    # Vert : taux d’occupation compris entre 0 et 40% ;
-                    # Orange : taux d’occupation compris entre 40 et 60% ;
-                    # Rouge : taux d'occupation supérieur à 60%.
-                    # R0
-                    # vert : R0 entre 0 et 1 ;
-                    # Orange : R0 entre 1 et 1,5 ;
-                    # Rouge : R0 supérieur à 1,5.
-                    cast = {'departement': 'string'}
-                    rename = {'extract_date': 'date', 'departement': 'location'}
-                    #columns_skipped=['region','libelle_reg','libelle_dep','tx_incid_couleur','R_couleur',\
-                    #'taux_occupation_sae_couleur','tx_pos_couleur','nb_orange','nb_rouge']
-                    spf4 = self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/4acad602-d8b1-4516-bc71-7d5574d5f33e",
-                                rename_columns = rename, separator=',', encoding = "ISO-8859-1", cast=cast)
-                    #
-                    #Prc_tests_PCR_TA_crible = % de tests PCR criblés parmi les PCR positives
-                    #Prc_susp_501Y_V1 = % de tests avec suspicion de variant 20I/501Y.V1 (UK)
-                    #Prc_susp_501Y_V2_3 = % de tests avec suspicion de variant 20H/501Y.V2 (ZA) ou 20J/501Y.V3 (BR)
-                    #Prc_susp_IND = % de tests avec une détection de variant mais non identifiable
-                    #Prc_susp_ABS = % de tests avec une absence de détection de variant
-                    #Royaume-Uni (UK): code Nexstrain= 20I/501Y.V1
-                    #Afrique du Sud (ZA) : code Nexstrain= 20H/501Y.V2
-                    #Brésil (BR) : code Nexstrain= 20J/501Y.V3
+                        #https://www.data.gouv.fr/fr/datasets/donnees-de-laboratoires-pour-le-depistage-indicateurs-sur-les-variants/
+                        #Prc_tests_PCR_TA_crible = % de tests PCR criblés parmi les PCR positives
+                        #Prc_susp_501Y_V1 = % de tests avec suspicion de variant 20I/501Y.V1 (UK)
+                        #Prc_susp_501Y_V2_3 = % de tests avec suspicion de variant 20H/501Y.V2 (ZA) ou 20J/501Y.V3 (BR)
+                        #Prc_susp_IND = % de tests avec une détection de variant mais non identifiable
+                        #Prc_susp_ABS = % de tests avec une absence de détection de variant
+                        #Royaume-Uni (UK): code Nexstrain= 20I/501Y.V1
+                        #Afrique du Sud (ZA) : code Nexstrain= 20H/501Y.V2
+                        #Brésil (BR) : code Nexstrain= 20J/501Y.V3
 
-                    cast = {'dep': 'string'}
-                    rename = {'dep': 'location'}
-                    constraints = {'cl_age90': 0}
-                    spf6 =  self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/16f4fd03-797f-4616-bca9-78ff212d06e8",
-                                constraints = constraints, rename_columns = rename, separator=';', cast=cast)
-                    #result = pd.concat([spf1, spf2,spf3,spf4,spf5], axis=1, sort=False)
-                    list_spf=[spf1, spf2, spf3, spf4, spf5, spf6]
+                        cast = {'dep': 'string'}
+                        rename = {'dep': 'location'}
+                        constraints = {'cl_age90': 0}
+                        spf6 =  self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/16f4fd03-797f-4616-bca9-78ff212d06e8",
+                                    constraints = constraints, rename_columns = rename, separator=';', cast=cast)
+                        #result = pd.concat([spf1, spf2,spf3,spf4,spf5], axis=1, sort=False)
+                        constraints = {'age_18ans': 10}
+                        spf7 =  self.csv2pandas("https://www.data.gouv.fr/fr/datasets/r/c0f59f00-3ab2-4f31-8a05-d317b43e9055",
+                                    constraints = constraints, rename_columns = rename, separator=';', cast=cast)
 
-                    for i in list_spf:
-                        i['date'] = pd.to_datetime(i['date']).apply(lambda x: x if not pd.isnull(x) else '')
+                        list_spf=[spf1, spf2, spf3, spf4, spf5, spf6, spf7]
 
-                    min_date=min([s.date.min() for s in list_spf])
-                    max_date=max([s.date.max() for s in list_spf])
-                    spf1, spf2, spf3, spf4, spf5, spf6 = spf1.set_index(['date', 'location']),\
-                                                spf2.set_index(['date', 'location']),\
-                                                spf3.set_index(['date', 'location']),\
-                                                spf4.set_index(['date', 'location']),\
-                                                spf5.set_index(['date', 'location']),\
-                                                spf6.set_index(['date', 'location'])
+                        for i in list_spf:
+                            i['date'] = pd.to_datetime(i['date']).apply(lambda x: x if not pd.isnull(x) else '')
 
-                    list_spf = [spf1, spf2, spf3, spf4, spf5, spf6]
-                    result = reduce(lambda left, right: pd.merge(left, right, on = ['date','location'],
-                                                how = 'outer'), list_spf)
-                    result = result.reset_index()
-                    #print(merged)
-                    #result = reduce(lambda x, y: x.merge(x, y, on = ['location','date']), [spf1, spf2,spf3,spf4,spf5])
-                    #print(result)
-                    # ['location', 'date', 'hosp', 'rea', 'rad', 'dc', 'incid_hosp',
-                       # 'incid_rea', 'incid_dc', 'incid_rad', 'P', 'T', 'pop', 'region',
-                       # 'libelle_reg', 'libelle_dep', 'tx_incid', 'R', 'taux_occupation_sae',
-                       # 'tx_pos', 'tx_incid_couleur', 'R_couleur',
-                       # 'taux_occupation_sae_couleur', 'tx_pos_couleur', 'nb_orange',
-                       # 'nb_rouge']
-                    #min_date=result['date'].min()
-                    for w in ['incid_hosp', 'incid_rea', 'incid_rad', 'incid_dc', 'P', 'T']:#, 'n_dose1', 'n_dose2']:
-                        result[w]=pd.to_numeric(result[w], errors = 'coerce')
-                        if w.startswith('incid_'):
-                            ww = w[6:]
-                            result[ww] = result.groupby('location')[ww].fillna(method = 'bfill')
-                            result['incid_'+ww] = result.groupby('location')['incid_'+ww].fillna(method = 'bfill')
-                            #result['offset_'+w] = result.loc[result.date==min_date][ww]-result.loc[result.date==min_date]['incid_'+ww]
-                            #result['offset_'+w] = result.groupby('location')['offset_'+w].fillna(method='ffill')
-                        else:
-                            pass
-                            #result['offset_'+w] = 0
-                        result['tot_'+w]=result.groupby(['location'])[w].cumsum()#+result['offset_'+w]
-                    #
-                    rename_dict={
-                        'dc': 'tot_dc',
-                        'hosp': 'cur_hosp',
-                        'rad': 'tot_rad',
-                        'rea': 'cur_rea',
-                        'tx_incid': 'cur_idx_tx_incid',
-                        'R': 'cur_idx_R',
-                        'taux_occupation_sae': 'cur_idx_taux_occupation_sae',
-                        'tx_pos': 'cur_idx_tx_pos',
-                        'n_cum_dose1': 'tot_vacc',
-                        'n_cum_dose2': 'tot_vacc2',
+                        min_date=min([s.date.min() for s in list_spf])
+                        max_date=max([s.date.max() for s in list_spf])
+                        spf1, spf2, spf3, spf4, spf5, spf6, spf7 = spf1.set_index(['date', 'location']),\
+                                                    spf2.set_index(['date', 'location']),\
+                                                    spf3.set_index(['date', 'location']),\
+                                                    spf4.set_index(['date', 'location']),\
+                                                    spf5.set_index(['date', 'location']),\
+                                                    spf6.set_index(['date', 'location']),\
+                                                    spf7.set_index(['date', 'location'])
 
-                        }
-                    result = result.rename(columns=rename_dict)
-                    columns_keeped  = list(rename_dict.values())+['tot_incid_hosp', 'tot_incid_rea', 'tot_incid_rad', 'tot_incid_dc', 'tot_P', 'tot_T']
-                    columns_keeped += ['Prc_tests_PCR_TA_crible', 'Prc_susp_501Y_V1', 'Prc_susp_501Y_V2_3', 'Prc_susp_IND', 'Prc_susp_ABS']
+                        list_spf = [spf1, spf2, spf3, spf4, spf5, spf6,spf7]
+                        result = reduce(lambda left, right: pd.merge(left, right, on = ['date','location'],
+                                                    how = 'outer'), list_spf)
+                        result = result.reset_index()
+                        #print(merged)
+                        #result = reduce(lambda x, y: x.merge(x, y, on = ['location','date']), [spf1, spf2,spf3,spf4,spf5])
+                        #print(result)
+                        # ['location', 'date', 'hosp', 'rea', 'rad', 'dc', 'incid_hosp',
+                           # 'incid_rea', 'incid_dc', 'incid_rad', 'P', 'T', 'pop', 'region',
+                           # 'libelle_reg', 'libelle_dep', 'tx_incid', 'R', 'taux_occupation_sae',
+                           # 'tx_pos', 'tx_incid_couleur', 'R_couleur',
+                           # 'taux_occupation_sae_couleur', 'tx_pos_couleur', 'nb_orange',
+                           # 'nb_rouge']
+                        #min_date=result['date'].min()
+                        for w in ['incid_hosp', 'incid_rea', 'incid_rad', 'incid_dc', 'P', 'T', 'n_dose1', 'n_dose2']:
+                            result[w]=pd.to_numeric(result[w], errors = 'coerce')
+                            if w.startswith('incid_'):
+                                ww = w[6:]
+                                result[ww] = result.groupby('location')[ww].fillna(method = 'bfill')
+                                result['incid_'+ww] = result.groupby('location')['incid_'+ww].fillna(method = 'bfill')
+                                #result['offset_'+w] = result.loc[result.date==min_date][ww]-result.loc[result.date==min_date]['incid_'+ww]
+                                #result['offset_'+w] = result.groupby('location')['offset_'+w].fillna(method='ffill')
+                            else:
+                                pass
+                                #result['offset_'+w] = 0
+                            result['tot_'+w]=result.groupby(['location'])[w].cumsum()#+result['offset_'+w]
+                        #
+                        for col in result.columns:
+                            if col.startswith('Prc'):
+                                result[col] /= 100.
+                        for col in result.columns:
+                            if col.startswith('ti'):
+                                result[col] /= 7. #par
+                        for col in result.columns:
+                            if col.startswith('tp'):
+                                result[col] /= 7. #par
 
-                    self.return_structured_pandas(result,columns_keeped=columns_keeped) # with 'tot_dc' first
+                        rename_dict={
+                            'dc': 'tot_dc',
+                            'hosp': 'cur_hosp',
+                            'rad': 'tot_rad',
+                            'rea': 'cur_rea',
+                            'tx_incid': 'cur_idx_tx_incid',
+                            'R': 'cur_idx_R',
+                            'taux_occupation_sae': 'cur_idx_taux_occupation_sae',
+                            'tx_pos': 'cur_idx_tx_pos',
+                            'tot_n_dose1': 'tot_vacc',
+                            'tot_n_dose2': 'tot_vacc2',
+                            'Prc_tests_PCR_TA_crible':'cur_idx_Prc_tests_PCR_TA_crible',
+                            'Prc_susp_501Y_V1':'cur_idx_Prc_susp_501Y_V1',
+                            'Prc_susp_501Y_V2_3':'cur_idx_Prc_susp_501Y_V2_3',
+                            'Prc_susp_IND':'cur_idx_Prc_susp_IND',
+                            'Prc_susp_ABS':'cur_idx_Prc_susp_ABS',
+                            'ti':'cur_idx_ti',
+                            'tp':'cur_idx_tp',
+                            }
+
+                        result = result.rename(columns=rename_dict)
+                        columns_keeped  = list(rename_dict.values())+['tot_incid_hosp', 'tot_incid_rea', 'tot_incid_rad', 'tot_incid_dc', 'tot_P', 'tot_T']
+                        self.return_structured_pandas(result,columns_keeped=columns_keeped) # with 'tot_dc' first
                 elif self.db == 'opencovid19' or  self.db == 'opencovid19national':
                     rename={'maille_code':'location'}
                     cast={'source_url':str,'source_archive':str,'source_type':str}
                     if self.db == 'opencovid19':
-                        info('OPENCOVID19 (county granularity) selected ...')
+                        info('OPENCOVID19 (country granularity) selected ...')
                         drop_field  = {'granularite':['pays','monde','region']}
                         dict_columns_keeped = {
                             'deces':'tot_deces',
@@ -389,12 +450,20 @@ class DataBase(object):
         '''
         return self.available_keys_words
 
-   def get_source(self):
-        '''
-        Return the current url used to fill the mainpandas
-        (csv file)
-        '''
-        return self.database_url
+   def get_keyword_definition(self,keys):
+       '''
+            Return definition on the selected keword
+       '''
+       value = self.geoinfo.generic_info(self.get_db(),keys)[0]
+       return value
+
+   def get_keyword_url(self,keys):
+       '''
+        Return url where the keyword have been parsed
+       '''
+       value = self.geoinfo.generic_info(self.get_db(),keys)[1]
+       master  = self.geoinfo.generic_info(self.get_db(),keys)[2]
+       return value, master
 
    def return_jhu_pandas(self):
         ''' For center for Systems Science and Engineering (CSSE) at Johns Hopkins University
@@ -405,18 +474,30 @@ class DataBase(object):
             '''
         base_url = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/"+\
                                 "csse_covid_19_data/csse_covid_19_time_series/"
-        jhu_files_ext = ['deaths', 'confirmed', 'recovered']
+        base_name = "time_series_covid19_"
+        # previous are default for actual jhu db
+
         pandas_jhu = {}
-        if self.db == 'jhu':
-            extansion =  "_global.csv"
-        else:
-            extansion = "_US.csv"
+
+        if self.db == 'jhu': # worldwide
+            extension =  "_global.csv"
+            jhu_files_ext = ['deaths', 'confirmed', 'recovered']
+        elif self.db == 'jhu-usa': # 'USA'
+            extension = "_US.csv"
             jhu_files_ext = ['deaths','confirmed']
+        elif self.db == 'rki': # 'DEU'
+            base_url = 'https://github.com/jgehrcke/covid-19-germany-gae/raw/master/'
+            jhu_files_ext = ['deaths','cases']
+            extension = '-rki-by-ags.csv'
+            base_name = ''
+        else:
+            raise CoaDbError('Unknown JHU like db '+str(self.db))
+
         self.available_keys_words = jhu_files_ext
 
         pandas_list = []
         for ext in jhu_files_ext:
-            fileName = "time_series_covid19_" + ext + extansion
+            fileName = base_name + ext + extension
             url = base_url + fileName
             self.database_url.append(url)
             pandas_jhu_db = pandas.read_csv(get_local_from_url(url,7200), sep = ',') # cached for 2 hours
@@ -432,14 +513,22 @@ class DataBase(object):
                     pandas_jhu_db = pandas_jhu_db.melt(id_vars=["location",'Population'],var_name="date",value_name=ext)
                 else:
                     pandas_jhu_db = pandas_jhu_db.melt(id_vars=["location"],var_name="date",value_name=ext)
+            elif self.db == 'rki':
+                pandas_jhu_db = pandas_jhu_db.drop(columns=['sum_'+ext])
+                pandas_jhu_db = pandas_jhu_db.set_index('time_iso8601').T.reset_index().rename(columns={'index':'location'})
+                pandas_jhu_db = pandas_jhu_db.melt(id_vars=["location"],var_name="date",value_name=ext)
+                pandas_jhu_db['location'] = pandas_jhu_db.location.astype(str)
             else:
                 raise CoaTypeError('jhu nor jhu-usa database selected ... ')
+
             pandas_jhu_db=pandas_jhu_db.groupby(['location','date']).sum().reset_index()
             pandas_list.append(pandas_jhu_db)
 
         uniqloc = pandas_list[0]['location'].unique()
         oldloc = uniqloc
         codedico={}
+        toremove = None
+        newloc = None
         if self.db_world:
             d_loc_s = self.geo.to_standard(list(uniqloc),output='list',db=self.get_db(),interpret_region=True)
             self.slocation = d_loc_s
@@ -452,12 +541,16 @@ class DataBase(object):
             loc_sub_code = list(self.geo.get_subregion_list()['code_subregion'])
             #loc_code = list(self.geo.get_data().loc[self.geo.get_data().name_subregion.isin(loc_sub)]['code_subregion'])
             self.slocation = loc_sub_code
-            oldloc = loc_sub_name
-            newloc = loc_sub_code
-            toremove = [x for x in uniqloc if x not in loc_sub_name]
-            codedico={i:j for i,j in zip(uniqloc,newloc)}
+            if self.db == 'jhu-usa':
+                oldloc = loc_sub_name
+                newloc = loc_sub_code
+                toremove = [x for x in uniqloc if x not in loc_sub_name]
+                codedico={i:j for i,j in zip(uniqloc,newloc)}
+
         result = reduce(lambda x, y: pd.merge(x, y, on = ['location','date']), pandas_list)
-        result = result.loc[~result.location.isin(toremove)]
+        if toremove is not None:
+            result = result.loc[~result.location.isin(toremove)]
+
         tmp = pd.DataFrame()
         if 'Kosovo' in oldloc:
             tmp=(result.loc[result.location.isin(['Kosovo','Serbia'])].groupby('date').sum())
@@ -469,17 +562,23 @@ class DataBase(object):
             tmp = tmp[cols]
             result = result.append(tmp)
 
-        result = result.replace(oldloc,newloc)
-        if self.db == 'jhu-usa':
-            result['codelocation'] = result['location']
-        else:
-            result['codelocation'] = result['location'].map(codedico)
+        if newloc is not None:
+            result = result.replace(oldloc,newloc)
+
+        #if self.db == 'jhu-usa':
+        #    result['codelocation'] = result['location'].map(codedico)
+        #else:
+        result['codelocation'] = result['location']
 
         result['date'] = pd.to_datetime(result['date'],errors='coerce').dt.date
-        self.dates  = result['date']
+
         result=result.sort_values(['location','date'])
         #self.mainpandas = result
-        self.mainpandas = fill_missing_dates(result)
+        if self.db != 'rki':
+            self.mainpandas = fill_missing_dates(result)
+        else:
+            self.mainpandas = result
+        self.dates  = self.mainpandas['date']
 
    def csv2pandas(self,url,**kwargs):
         '''
@@ -519,13 +618,15 @@ class DataBase(object):
             for key,val in rename_columns.items():
                 pandas_db = pandas_db.rename(columns={key:val})
         if 'semaine' in  pandas_db.columns:
-            pandas_db['semaine'] = [ rollingweek_to_middledate(i) for i in pandas_db['semaine'] ]
+            pandas_db['semaine'] = [ week_to_date(i) for i in pandas_db['semaine'] ]
             pandas_db = pandas_db.rename(columns={'semaine':'date'})
-
-
         pandas_db['date'] = pandas.to_datetime(pandas_db['date'],errors='coerce').dt.date
-        self.dates  = pandas_db['date']
+        #self.dates  = pandas_db['date']
+
+        if self.db == 'spfnational':
+            pandas_db['location'] = ['France']*len(pandas_db)
         pandas_db = pandas_db.sort_values(['location','date'])
+
         if self.db == 'owid':
             pandas_db = pandas_db.loc[~pandas_db.iso_code.isnull()]
 
@@ -538,9 +639,9 @@ class DataBase(object):
         kwargs_test(kwargs,['columns_skipped','columns_keeped'],
             'Bad args used in the return_structured_pandas function.')
         columns_skipped = kwargs.get('columns_skipped', None)
-        columns_keeped  = kwargs.get('columns_keeped', None)
-
         absolutlyneeded = ['date','location']
+        defaultkeept = list(set(mypandas.columns.to_list()) - set(absolutlyneeded))
+        columns_keeped  = kwargs.get('columns_keeped', defaultkeept)
 
         if columns_skipped:
             columns_keeped = [x for x in mypandas.columns.values.tolist() if x not in columns_skipped + absolutlyneeded]
@@ -593,6 +694,7 @@ class DataBase(object):
         mypandas['codelocation'] = mypandas['location'].map(codedico)
         #self.mainpandas = mypandas
         self.mainpandas = fill_missing_dates(mypandas)
+        self.dates  = self.mainpandas['date']
 
    def get_mainpandas(self,**kwargs):
        '''
@@ -715,10 +817,18 @@ class DataBase(object):
         else:
             kwargs['location']=kwargs['location']
 
+        doublelist = None
+        devorigclist = None
+        origclistlist = None
         if not isinstance(kwargs['location'], list):
             clist = ([kwargs['location']]).copy()
+            origclist = clist
         else:
             clist = (kwargs['location']).copy()
+            origclist = clist
+            if any(isinstance(c, list) for c in clist):
+                origclistlist = clist
+                clist = [ c[0] if isinstance(c, list) else c for c in clist]
         if not all(isinstance(c, str) for c in clist):
             raise CoaWhereError("Location via the where keyword should be given as strings. ")
 
@@ -729,8 +839,22 @@ class DataBase(object):
         if self.db_world:
             self.geo.set_standard('name')
             clist=self.geo.to_standard(clist,output='list',interpret_region=True)
+            if origclistlist != None:
+                fulllist = [ i if isinstance(i, list) else [i] for i in origclist ]
+                devorigclist = [ self.geo.to_standard(i,output='list',interpret_region=True) for i in fulllist ]
         else:
             clist=clist+self.geo.get_subregions_from_list_of_region_names(clist)
+            if origclistlist != None:
+                if not all(isinstance(c, list) for c in origclistlist):
+                    raise CoaWhereError("In the case of national DB, all locations must have the same types i.e\
+                    list or string but both is not accepted, could be confusing")
+                devorigclist = [ self.geo.get_subregions_from_list_of_region_names(i) if not len(i[0])<3 and len(i[0])>=2 else i for i in origclistlist ]
+                if origclistlist == [['Métropole']]:
+                    all_region= self.geo.get_region_list()
+                    all_codes=all_region.code_region.astype(int)
+                    origclistlist = [[i] for i in all_region[(all_codes>10) & (all_codes<100)].name_region.to_list()]
+                    devorigclist=[ self.geo.get_subregions_from_list_of_region_names(i) for i in origclistlist ]
+                #devorigclist = [ self.geo.get_subregions_from_list_of_region_names(i) if isinstance(i, list) else i for i in origclist ]
             if clist == ['FRA'] or clist == ['USA']:
                 clist=self.geo_all
 
@@ -750,7 +874,6 @@ class DataBase(object):
         #    clist.remove('Serbia')
         #    pdfiltered = self.get_mainpandas().loc[self.get_mainpandas().location.isin(clist)].reset_index()
         #    pdfiltered = pd.concat([pdfiltered,ptot])
-
         pdfiltered = pdfiltered[['location','date','codelocation',kwargs['which']]]
 
         # insert dates at the end for each country if necessary
@@ -812,6 +935,8 @@ class DataBase(object):
                 fillnan = False
             elif o == 'sumall':
                 sumall = True
+                if kwargs['which'].startswith('cur_idx_Prc'):
+                    print('Warning this data is from rolling value, ended date may be not correct ...')
             elif o != None and o != '':
                 raise CoaKeyError('The option '+o+' is not recognized in get_stats. See get_available_options() for list.')
 
@@ -822,24 +947,39 @@ class DataBase(object):
             pdfiltered = pdfiltered.fillna(0)
 
         # if sumall set, return only integrate val
+        tmppandas=pd.DataFrame()
         if sumall:
-            loc = pdfiltered['location'].unique()
-            ntot=len(loc)
-            ptot=pdfiltered.groupby(['location']).fillna(method='ffill').groupby(['date']).sum().reset_index()   # summing for all locations
+            if devorigclist != None:
+               k=0
+               for i in devorigclist:
+                   if isinstance(i, list):
+                       tmp = pdfiltered.loc[pdfiltered.location.isin(i)]
+                       tmp = tmp.drop(columns=['location','codelocation'])
+                       tmp = tmp.groupby('date').sum().reset_index()
+                       tmp['location'] = [i]*len(tmp)
+                       tmp['codelocation'] = [str(origclistlist[k])]*len(tmp)
+                   else:
+                        tmp = pdfiltered.loc[pdfiltered.location==i]
+                   if tmppandas.empty:
+                        tmppandas = tmp
+                   else:
+                       tmppandas = tmppandas.append(tmp)
+                   k+=1
+               pdfiltered = tmppandas
+               ntot = len(devorigclist)
+
+            else:
+               pdfiltered = pdfiltered.drop(['location','codelocation'],axis=1,)
+               pdfiltered = pdfiltered.groupby('date').sum().reset_index()
+               pdfiltered['location'] = [clist]*len(pdfiltered)
+               pdfiltered['codelocation'] = [str(origclist)]*len(pdfiltered)
+               ntot=len(clist)
 
             # mean for some columns, about index and not sum of values.
-            for col in ptot.columns:
+            for col in pdfiltered.columns:
                 if col.startswith('cur_idx_'):
-                    ptot[col]=ptot[col]/ntot
-            # adding the location name
-            #all_loc_string=str(kwargs['location'])
-                #if len(kwargs['location'])>2:
-                    #all_loc_string="["+str(kwargs['location'][0])+"..."+str(kwargs['location'][-1])+"]"
-            ptot['location']=[list(loc)]*len(ptot)
-            if type(kwargs['location']) == str:
-                kwargs['location']= [kwargs['location']]
-            ptot['codelocation']=[str(kwargs['location'])]*len(ptot)
-            pdfiltered=ptot
+                    pdfiltered[col] /= ntot
+
             pdfiltered['daily'] = pdfiltered[kwargs['which']].diff()
             pdfiltered['cumul'] = pdfiltered[kwargs['which']].cumsum()
             pdfiltered['weekly'] = pdfiltered[kwargs['which']].diff(7)
