@@ -536,7 +536,7 @@ class CocoDisplay:
         df['text_y'] = df['middle'].apply(np.sin)*r
         df['text_y2'] = df['text_y']
         df.loc[:, 'text_y2'] = ( df['text_y2'] - 0.1 )
-        df['text_size'] = [str(10)+'pt' if i > 0.08*(2 * np.pi) else '4pt' for i in df['diff']]
+        df['text_size'] = '10pt'
         df['text_angle'] = 0.
         df.loc[:, 'percentage'] = (( df['percentage'] * 100 ).astype(np.double).round(2)).apply(lambda x: str(x))
 
@@ -634,11 +634,11 @@ class CocoDisplay:
             if len(input_field) != 2:
                 raise CoaTypeError('Two variables are needed to be plotted ... ')
 
-            for loc in mypandas.location.unique():
-                pandaloc = mypandas.loc[mypandas.location == loc].sort_values(by='date', ascending='True')
+            for loc in mypandas.clustername.unique():
+                pandaloc = mypandas.loc[mypandas.clustername == loc].sort_values(by='date', ascending='True')
                 pandaloc.rename(columns={input_field[0]: 'casesx', input_field[1]: 'casesy'}, inplace=True)
                 standardfig.line(x='casesx', y='casesy',
-                                 source=ColumnDataSource(pandaloc), legend_label=pandaloc.codelocation.iloc[0],
+                                 source=ColumnDataSource(pandaloc), legend_label=pandaloc.clustername.iloc[0],
                                  color=pandaloc.colors.iloc[0], line_width=3, hover_line_width=4)
 
             standardfig.legend.label_text_font_size = "12px"
@@ -661,7 +661,6 @@ class CocoDisplay:
             standardfig.yaxis[0].formatter = PrintfTickFormatter(format = "%4.2e")
             i = 0
             r_list=[]
-
             for val in input_field:
                 line_style = ['solid', 'dashed', 'dotted', 'dotdash']
                 for loc in list(mypandas.clustername.unique()):
@@ -803,7 +802,7 @@ class CocoDisplay:
             geopdwd = geopdwd.sort_values(by = input_field, ascending=False)
             #geopdwd = geopdwd.dropna(subset = [input_field])
             geopdwd = geopdwd.reset_index(drop = True)
-            orientation = kwargs.get('orientation', 'vertical')
+            orientation = kwargs.get('orientation', 'horizontal')
 
             if dico['when_end'] <= geopdwd.date.min():
                 started = geopdwd.date.min()
@@ -829,7 +828,6 @@ class CocoDisplay:
                     geopdwd_filter = pd.merge(geopdwd_filter, self.location_geometry, on='location')
                 geopdwd_filter = gpd.GeoDataFrame(geopdwd_filter, geometry=geopdwd_filter.geometry, crs="EPSG:4326")
                 dico['tile'] = CocoDisplay.get_tile(dico['tile'], func.__name__)
-
             if func.__name__ == 'inner' or func.__name__ == 'pycoa_histo':
                 pos = {}
                 new = pd.DataFrame(columns=geopdwd_filter.columns)
@@ -851,6 +849,7 @@ class CocoDisplay:
             geopdwd_filter = geopdwd_filter.reset_index(drop=True)
             if cursor_date is False:
                 date_slider = False
+
             return func(self, input_field, date_slider, maplabel, dico, geopdwd, geopdwd_filter)
         return generic_hm
 
@@ -923,6 +922,7 @@ class CocoDisplay:
         HoverTool is available it returns position of the middle of the bin and the value.
         """
         mypandas = geopdwd_filtered.rename(columns = {'cases': input_field})
+
         if 'location' in mypandas.columns:
             uniqloc = list(mypandas.codelocation.unique())
 
@@ -1005,17 +1005,15 @@ class CocoDisplay:
             title_fig = input_field
             geopdwd['cases'] = geopdwd[input_field]
             geopdwd_filtered['cases'] = geopdwd_filtered[input_field]
-
             my_date = geopdwd.date.unique()
             dico_utc = {i: DateSlider(value=i).value for i in my_date}
             geopdwd['date_utc'] = [dico_utc[i] for i in geopdwd.date]
-
+            geopdwd = geopdwd.drop_duplicates(["date", "codelocation","clustername"])#for sumall avoid duplicate
             locunique = geopdwd_filtered.location.unique()
             geopdwd_filter = geopdwd_filtered.copy()
             nmaxdisplayed = 18
             if len(locunique) >= nmaxdisplayed:
                 geopdwd_filter = geopdwd_filter.loc[geopdwd_filter.location.isin(locunique[:nmaxdisplayed])]
-
             if func.__name__ == 'pycoa_horizonhisto' :
                 #geopdwd_filter['bottom'] = geopdwd_filter.index
                 geopdwd_filter['left'] = geopdwd_filter['cases']
@@ -1076,7 +1074,8 @@ class CocoDisplay:
 
                 #if date_slider and mypandas_filter[mypandas_filter[input_field] < 0].empty:
                 if date_slider:
-                    date_slider.height = int(0.8 * self.plot_height)
+                    #date_slider.height = int(0.8*self.plot_height)
+                    date_slider.width = int(0.8*self.plot_width)
                     callback = CustomJS(args = dict(source = source,
                                                   source_filter = srcfiltered,
                                                   date_slider = date_slider,
@@ -1089,6 +1088,7 @@ class CocoDisplay:
                             var dates = source.data['date_utc'];
                             var val = source.data['cases'];
                             var loc = source.data['clustername'];
+                            //var loc = source.data['location'];
                             var subregion = source.data['name_subregion'];
                             var codeloc = source.data['codelocation'];
                             var colors = source.data['colors'];
@@ -1107,28 +1107,34 @@ class CocoDisplay:
                                 newcolors.push(colors[i]);
                                 if(typeof subregion !== 'undefined')
                                     newname_subregion.push(subregion[i]);
+
                                 }
                             }
+                            console.log(newcodeloc);
                             var len = source_filter.data['clustername'].length;
+
                             var indices = new Array(len);
                             for (var i = 0; i < len; i++) indices[i] = i;
+
                             indices.sort(function (a, b) { return newval[a] > newval[b] ? -1 : newval[a] < newval[b] ? 1 : 0; });
                             var orderval = [];
                             var orderloc = [];
                             var ordercodeloc = [];
                             var ordername_subregion = [];
                             var ordercolors = [];
-
                             for (var i = 0; i < len; i++)
                             {
                                 orderval.push(newval[indices[i]]);
                                 orderloc.push(newloc[indices[i]]);
                                 ordercodeloc.push(newcodeloc[indices[i]]);
+
                                 if(typeof subregion !== 'undefined')
                                     ordername_subregion.push(newname_subregion[i]);
                                 ordercolors.push(newcolors[indices[i]]);
                                 labeldic[len-indices[i]] = ordercodeloc[indices[i]];
                             }
+
+
                             source_filter.data['cases'] = orderval;
                             const reducer = (accumulator, currentValue) => accumulator + currentValue;
                             var tot = orderval.reduce(reducer);
@@ -1162,10 +1168,10 @@ class CocoDisplay:
                                 text_y2.push(r*Math.sin(middle[i])-0.1);
                                 percentage.push(String(100.*orderval[i] / tot).slice(0, 4));
 
-                                if ((ends[i]-starts[i]) > 0.08*(2 * Math.PI))
+                                /*if ((ends[i]-starts[i]) > 0.08*(2 * Math.PI))
                                     text_size.push('10pt');
                                 else
-                                    text_size.push('6pt');
+                                    text_size.push('6pt');*/
 
                                 top.push((orderval.length-i) + bthick/2);
                                 bottom.push((orderval.length-i) - bthick/2);
@@ -1197,7 +1203,7 @@ class CocoDisplay:
                             source_filter.data['text_x'] = text_x;
                             source_filter.data['text_y'] = text_y;
                             source_filter.data['text_y2'] = text_y2;
-                            source_filter.data['text_size'] = text_size;
+                            //source_filter.data['text_size'] = text_size;
                             source_filter.data['percentage'] = percentage;
 
                             ylabel.major_label_overrides = labeldic;
@@ -1213,7 +1219,7 @@ class CocoDisplay:
                                 mid.push(bottom[i]+(top[i] - bottom[i])/2);
                                 ht.push(right_quad[i].toFixed(2).toString());
                             }
-                            console.log(mid);
+
                             source_filter.data['horihistotextxy'] =  mid;
                             source_filter.data['horihistotextx'] =  right_quad
                             source_filter.data['horihistotext'] =  ht
@@ -1259,7 +1265,7 @@ class CocoDisplay:
     @decohistopie
     def pycoa_horizonhisto(self, srcfiltered, panels, date_slider):
         n = len(panels)
-        loc = srcfiltered.data['clustername']
+        loc = srcfiltered.data['codelocation']#srcfiltered.data['clustername']
         chars = [' ','-']
         returnchars = [x for x in loc if x in chars]
         label_dict = {}
@@ -1287,7 +1293,7 @@ class CocoDisplay:
             new_panels.append(panel)
         tabs = Tabs(tabs = new_panels)
         if date_slider:
-                tabs = row(tabs, date_slider)
+                tabs = column(date_slider,tabs)
         return tabs
 
     @decohistomap
@@ -1304,15 +1310,13 @@ class CocoDisplay:
                          start_angle = 'starts', end_angle = 'ends',
                          line_color = 'white', color = 'colors', legend_label = 'clustername', source = srcfiltered)
         standardfig.legend.visible = False
-        txt1 = Text(x = 'text_x', y = 'text_y', text = 'textdisplayed', angle = 'text_angle',
+        txt = Text(x = 'text_x', y = 'text_y', text = 'textdisplayed', angle = 'text_angle',
               text_align = 'center', text_font_size = 'text_size')
-        #txt2 = Text(x = 'text_x', y = 'text_y2', text = 'percentage', angle = 'text_angle',
-        #          text_align = 'center', text_font_size = 'text_size')
-        standardfig.add_glyph(srcfiltered,txt1)
-        #standardfig.add_glyph(srcfiltered,txt2)
+
+        standardfig.add_glyph(srcfiltered,txt)
 
         if date_slider:
-            standardfig = row(standardfig,date_slider)
+            standardfig = column(date_slider,standardfig)
         return standardfig
 
     @decohistomap

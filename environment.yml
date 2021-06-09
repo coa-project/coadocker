@@ -2,7 +2,7 @@ name: pycoa-environment
 channels:
   - conda-forge
 dependencies:
-  - python
+  - python=3.7.6
   - numpy
   - pip
   - pip:
