@@ -9,7 +9,6 @@ dependencies:
     - nbgitpuller
     - sphinx-gallery
     - pandas
-    - pandas_flavor
     - matplotlib
     - bokeh
     - branca
