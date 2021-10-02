@@ -27,3 +27,4 @@ dependencies:
     - scipy
     - shapely
     - pytest >=5.0
+    - unidecode
