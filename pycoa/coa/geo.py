@@ -36,7 +36,7 @@ import shapely.affinity as sa
 import shapely.ops as so
 import bs4
 
-from coa.tools import verb,kwargs_test,get_local_from_url,dotdict
+from coa.tools import verb,kwargs_test,get_local_from_url,dotdict,tostdstring
 from coa.error import *
 
 # ---------------------------------------------------------------------
@@ -170,7 +170,6 @@ class GeoManager():
 
         if db:
             w=self.first_db_translation(w,db)
-
         n=[] # will contain standardized name of countries (if possible)
 
         #for c in w:
@@ -191,7 +190,11 @@ class GeoManager():
                         n0=pc.countries.lookup(c)
                     except LookupError:
                         try:
-                            nf=pc.countries.search_fuzzy(c)
+                            if c.startswith('Owid_'):
+                                nf=['owid_*']
+                                n1='OWID_*'
+                            else:
+                                nf=pc.countries.search_fuzzy(c)
                             if len(nf)>1:
                                 warnings.warn('Caution. More than one country match the key "'+\
                                 c+'" : '+str([ (k.name+', ') for k in nf])+\
@@ -204,17 +207,18 @@ class GeoManager():
                     except Exception as e2:
                         raise CoaNotManagedError('Not managed error'+type(e1))
 
-                    if self._standard=='iso2':
-                        n1=n0.alpha_2
-                    elif self._standard=='iso3':
-                        n1=n0.alpha_3
-                    elif self._standard=='name':
-                        n1=n0.name
-                    elif self._standard=='num':
-                        n1=n0.numeric
-                    else:
-                        raise CoaKeyError('Current standard is '+self._standard+\
-                            ' which is not managed. Error.')
+                    if n0 != 'owid_*':
+                        if self._standard=='iso2':
+                            n1=n0.alpha_2
+                        elif self._standard=='iso3':
+                            n1=n0.alpha_3
+                        elif self._standard=='name':
+                            n1=n0.name
+                        elif self._standard=='num':
+                            n1=n0.numeric
+                        else:
+                            raise CoaKeyError('Current standard is '+self._standard+\
+                                ' which is not managed. Error.')
 
                 n.append(n1)
 
@@ -570,7 +574,7 @@ class GeoRegion():
         p_m49=pd.read_html(get_local_from_url(self._source_dict["UN_M49"],0))[1]
 
         p_m49.columns=['code','region_name']
-        p_m49['region_name']=[r.split('(')[0].rstrip() for r in p_m49.region_name]  # suppress information in parenthesis in region name
+        p_m49['region_name']=[r.split('(')[0].rstrip().title() for r in p_m49.region_name]  # suppress information in parenthesis in region name
         p_m49.set_index('code')
 
         self._region_dict.update(p_m49.to_dict('split')['data'])
@@ -611,19 +615,28 @@ class GeoRegion():
     def get_region_list(self):
         return list(self._region_dict.values())
 
+    def is_region(self,region):
+        """ it returns either False or the correctly named region name
+        """
+        if type(region) != str:
+            raise CoaKeyError("The given region is not a str type.")
+
+        region=region.title()  # if not properly capitalized
+        
+        if region not in self.get_region_list():
+            return False
+        else :
+            return region
+
     def get_countries_from_region(self,region):
         """ it returns a list of countries for the given region name.
         The standard used is iso3. To convert to another standard,
         use the GeoManager class.
         """
-
-        if type(region) != str:
-            raise CoaKeyError("The given region is not a str type.")
-
-        region=region.title()  # if not properly capitalized
-
-        if region not in self.get_region_list():
+        r = self.is_region(region)
+        if not r:
             raise CoaKeyError('The given region "'+str(region)+'" is unknown.')
+        region=r
 
         clist=[]
 
@@ -697,6 +710,8 @@ class GeoCountry():
                     'BEL':'https://public.opendatasoft.com/explore/dataset/arrondissements-belges-2019/download/?format=shp&timezone=Europe/Berlin&lang=en',\
                     'PRT':'https://github.com/coa-project/coadata/raw/main/coastore/concelhos.zip',\
                     # (simplification of 'https://github.com/coa-project/coadata/raw/main'https://dados.gov.pt/en/datasets/r/59368d37-cbdb-426a-9472-5a04cf30fbe4',\
+                    'MYS':'https://stacks.stanford.edu/file/druid:zd362bc5680/data.zip',\
+                    'CHL':'http://geonode.meteochile.gob.cl/geoserver/wfs?format_options=charset%3AUTF-8&typename=geonode%3Adivision_comunal_geo_ide_1&outputFormat=SHAPE-ZIP&version=1.0.0&service=WFS&request=GetFeature',\
                     }
 
     _source_dict = {'FRA':{'Basics':_country_info_dict['FRA'],\
@@ -712,6 +727,8 @@ class GeoCountry():
                     'BEL':{'Basics':_country_info_dict['BEL']},\
                     'PRT':{'Basics':_country_info_dict['PRT']},\
                     #,'District':'https://raw.githubusercontent.com/JoaoFOliveira/portuguese-municipalities/master/municipalities.json'},\
+                    'MYS':{'Basics':_country_info_dict['MYS']},\
+                    'CHL':{'Basics':_country_info_dict['CHL']},\
                     }
 
     def __init__(self,country=None,**kwargs):
@@ -850,7 +867,7 @@ class GeoCountry():
                 img.replace_with(src)
 
             h_us=pd.read_html(str(soup_us)) # pandas read the modified html
-            h_us=h_us[0][h_us[0].columns[[0,1,2,5,7]]]
+            h_us=h_us[1][h_us[1].columns[[0,1,2,5,7]]]
             h_us.columns=['flag_subregion','code_subregion','town_subregion','population_subregion','area_subregion']
             h_us['flag_subregion'] = [ h.split('\xa0')[0] for h in h_us['flag_subregion'] ]
             self._country_data=self._country_data.merge(h_us,how='left',on='code_subregion')
@@ -1000,7 +1017,7 @@ class GeoCountry():
             self._country_data['geometry']=self._country_data.geometry.to_crs('epsg:4326')
         # --- 'PRT' case --------------------------------------------------------------------------------------------
         elif self._country == 'PRT':
-            self._country_data = gpd.read_file('zip://'+get_local_from_url(url,0,'.zip'))
+            self._country_data = gpd.read_file('zip://'+get_local_from_url(url,0,'.zip'),encoding='utf-8')
             #self._district=pd.read_json(self._source_dict['PRT']['District'])[['name','district']].dropna()
 
             self._country_data.rename(columns={\
@@ -1009,7 +1026,32 @@ class GeoCountry():
                 'HASC_2':'code_subregion'},inplace=True)
             self._country_data['code_region']=self._country_data.code_subregion.str.slice(stop=5)
             self._country_data=self._country_data[['name_subregion','code_subregion','name_region','code_region','geometry']]
-
+        # --- 'MYS' case --------------------------------------------------------------------------------------------
+        elif self._country == 'MYS':
+            self._country_data = gpd.read_file('zip://'+get_local_from_url(url,0,'.zip')).dissolve(by='nam').reset_index()
+            self._country_data['name_subregion']=[n.title() for n in self._country_data.nam]
+            self._country_data['code_subregion']=self._country_data.name_subregion
+            self._country_data['code_region']='MYS'
+            self._country_data['name_region']='Malaysia'
+            self._country_data['code_subregion']=self._country_data.code_subregion
+            # to help the join procedure with current covid data, some translation
+            dict_subregion={\
+                'Wilayah Persekutuan Labuan':'W.P. Labuan',\
+                'Wilayah Persekutuan':'W.P. Kuala Lumpur',\
+                }
+            self._country_data.loc[self._country_data.code_subregion.isin(list(dict_subregion.keys())),'code_subregion'] = \
+                [dict_subregion[x] for x in self._country_data.code_subregion if x in list(dict_subregion.keys())]
+            self._country_data=self._country_data[['name_subregion','code_subregion','name_region','code_region','geometry']]
+        # --- 'CHL' case --------------------------------------------------------------------------------------------
+        elif self._country == 'CHL':
+            self._country_data = gpd.read_file('zip://'+get_local_from_url(url,0,'.zip'),encoding='utf-8')
+            self._country_data.rename(columns={\
+                'NOM_REG':'name_region',\
+                'NOM_COM':'name_subregion'},inplace=True)
+            self._country_data['code_subregion']=[str(c).zfill(5) for c in self._country_data.COD_COMUNA]
+            self._country_data['code_region']=self._country_data.code_subregion.str.slice(stop=2)
+            self._country_data=self._country_data[['name_subregion','code_subregion','name_region','code_region','geometry']]
+            
     # def get_region_from_municipality(self,lname):
     #     """  Return region list from a municipality list
     #     """
@@ -1058,12 +1100,33 @@ class GeoCountry():
         cols.append('geometry')
         return self.get_data(True)[cols]
 
+    def is_region(self,r):
+        """ Return False if r is a not a known region, return the correctly capitalized name if ok
+        """
+        r=tostdstring(r)
+        for i in self.get_region_list().name_region.to_list():
+            if tostdstring(i) == r:
+                return i
+        return False
+
     def get_subregion_list(self):
         """ Return the list of available subregions with code, name and geometry
         """
         cols=[c for c in self.get_list_properties() if '_subregion' in c ]
         cols.append('geometry')
         return self.get_data()[cols]
+
+    def is_subregion(self,r):
+        """ Return False if r is a not a known region, return the correctly capitalized name if ok
+        """
+        r2=tostdstring(r)
+        for i in self.get_subregion_list().name_subregion.to_list():
+            if tostdstring(i) == r2:
+                return i
+        a=self.get_subregion_list()[self.get_subregion_list().code_subregion==r].name_subregion.values  
+        if a.size == 1:
+            return a[0]
+        return False
 
     def get_subregions_from_region(self,**kwargs):
         """ Return the list of subregions within a specified region.
@@ -1093,20 +1156,17 @@ class GeoCountry():
                 raise CoaWhereError("The region "+code+" does not exist for country "+self.get_country()+". See get_region_list().")
             cut=(self.get_data(True)['code_region']==code)
 
-        return self.get_data(True)[cut][out+'_subregion'].iloc[0]#.to_list()
+        return self.get_data(True)[cut][out+'_subregion'].iloc[0]#to_list()
 
     def get_subregions_from_list_of_region_names(self,l,output='code'):
         """ Return the list of subregions according to list of region names given.
         The output argument ('code' as default) is given to the get_subregions_from_region function.
         """
         if not isinstance(l,list):
-            CoaTypeError("Should provide list as argument")
+            raise CoaTypeError("Should provide list as argument")
         s=[]
         for r in l:
-            try:
-                s=s+self.get_subregions_from_region(name=r,output=output)
-            except CoaWhereError:
-                pass
+            s=s+self.get_subregions_from_region(name=r,output=output)
         return s
 
     def get_list_properties(self):
@@ -1142,7 +1202,6 @@ class GeoCountry():
                         pr_metropole['code_region']='999'
                         pr_metropole['name_region']='Métropole'
                         pr_metropole['flag_region']=''
-
                         pr_outremer=pr[~metropole_cut].copy()
                         pr_outremer['code_region']='000'
                         pr_outremer['name_region']='Outre-mer'
@@ -1186,7 +1245,7 @@ class GeoCountry():
 
                     pr['code_subregion']=pr.code_subregion.apply(lambda x: [x])
                     pr['name_subregion']=pr.name_subregion.apply(lambda x: [x])
-                    self._country_data_region=pr.dissolve(by=col_reg,aggfunc='sum').sort_values(by='code_region').reset_index()
+                    self._country_data_region=pr.dissolve(by=col_reg,aggfunc=(lambda x: x.sum())).sort_values(by='code_region').reset_index()
                 return self._country_data_region
             else:
                 if not isinstance(self._country_data_subregion,pd.DataFrame): #i.e. is None
